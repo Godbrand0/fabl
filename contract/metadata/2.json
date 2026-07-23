@@ -1,0 +1,10 @@
+{
+  "name": "Ember Blade",
+  "description": "Forged deep in the lava fields of Ember. Burns through enemy defences with volcanic heat.",
+  "image": "https://ipfs.io/ipfs/bafkreigtepyv7cdegu6mt3jbaqhb3rggtlpcbpda2xjl3kehoytejbofae",
+  "properties": {
+    "itemSlug": "ember_blade",
+    "type": "weapon",
+    "tokenId": 2
+  }
+}

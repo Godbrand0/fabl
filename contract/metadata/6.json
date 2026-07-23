@@ -1,0 +1,10 @@
+{
+  "name": "Stone Shield",
+  "description": "A surge of volcanic armour that hardens the hero's body and absorbs incoming damage.",
+  "image": "https://ipfs.io/ipfs/bafkreifafdpgft4eu3qqdujestw4ioo6vr4fxtka6khmblj54fpdzl37pm",
+  "properties": {
+    "itemSlug": "stone_shield",
+    "type": "ability",
+    "tokenId": 6
+  }
+}

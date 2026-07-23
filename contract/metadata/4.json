@@ -1,0 +1,10 @@
+{
+  "name": "Fire Nova",
+  "description": "A devastating AoE fire burst that erupts from the hero and scorches all enemies nearby.",
+  "image": "https://ipfs.io/ipfs/bafkreibh7mbmchsn7dhyawtgwgrzp36owxu5fkbfbpdafw2xyus5uqw4pq",
+  "properties": {
+    "itemSlug": "fire_nova",
+    "type": "ability",
+    "tokenId": 4
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "name": "Poison Cloak",
+  "description": "Releases a toxic cloud that slows and drains enemies caught within its reach.",
+  "image": "https://ipfs.io/ipfs/bafkreiapd5i57pnywfwokh4wa645gnikceg34o45cej33sk3ie7drbm3ia",
+  "properties": {
+    "itemSlug": "poison_cloak",
+    "type": "ability",
+    "tokenId": 5
+  }
+}

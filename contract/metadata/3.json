@@ -1,0 +1,10 @@
+{
+  "name": "Obsidian Greatsword",
+  "description": "Hewn from the heaviest volcanic obsidian known. Devastating in the hands of a skilled warrior.",
+  "image": "https://ipfs.io/ipfs/bafkreid6iymbvs4bvpykgaqdnjyn5jqukthsthf4naa4ne3pncsyzvrmci",
+  "properties": {
+    "itemSlug": "obsidian_greatsword",
+    "type": "weapon",
+    "tokenId": 3
+  }
+}

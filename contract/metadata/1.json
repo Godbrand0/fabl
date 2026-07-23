@@ -1,0 +1,10 @@
+{
+  "name": "Iron Sword",
+  "description": "A sturdy iron sword forged for the frontlines of Fable. Reliable and battle-tested.",
+  "image": "https://ipfs.io/ipfs/bafkreideyhxcatm55omejqkyygnxmves6rsn6e4eurpn5rweore5c3w4wu",
+  "properties": {
+    "itemSlug": "iron_sword",
+    "type": "weapon",
+    "tokenId": 1
+  }
+}
