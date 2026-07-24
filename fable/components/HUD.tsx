@@ -13,7 +13,11 @@ interface HUDProps {
   playerData: any;
   setPlayerData: React.Dispatch<React.SetStateAction<any>>;
   walletAddress: string;
+  walletConnected: boolean;
+  connectWallet: () => Promise<void>;
   avaxBalance: string;
+  fableBalance: string;
+  refreshBalance: () => Promise<void>;
   onOpenMenu: () => void;
 }
 
@@ -21,7 +25,11 @@ export default function HUD({
   playerData,
   setPlayerData,
   walletAddress,
+  walletConnected,
+  connectWallet,
   avaxBalance,
+  fableBalance,
+  refreshBalance,
   onOpenMenu,
 }: HUDProps) {
   const [currentZone, setCurrentZone] = useState<string>('Booting...');
@@ -71,21 +79,10 @@ export default function HUD({
       });
     });
 
-    // 4. Gold Sync
-    const unsubGold = gameBridge.on('player_gold_changed', (gained: number) => {
-      setPlayerData((prev: any) => {
-        const newGold = prev.gold + gained;
-        const updated = { ...prev, gold: newGold };
-        dbService.savePlayer(updated);
-        return updated;
-      });
-    });
-
     // 5. XP Sync
     const unsubXP = gameBridge.on('player_xp_gained', (gained: number) => {
       setPlayerData((prev: any) => {
-        const actualGain = prev.ubiBuffActive ? Math.floor(gained * 1.5) : gained;
-        let newXP = prev.xp + actualGain;
+        let newXP = prev.xp + gained;
         let newLevel = prev.level;
         let statPoints = prev.statPoints || 0;
         const xpNeeded = newLevel * 100;
@@ -179,7 +176,6 @@ export default function HUD({
       unsubPauseFlush();
       unsubOpenMenu();
       unsubHP();
-      unsubGold();
       unsubXP();
       unsubLoot();
       unsubClear();
@@ -233,8 +229,8 @@ export default function HUD({
 
         {/* Currency & Zone */}
         <div className="flex flex-col gap-1 items-end">
-          <div className="flex gap-1.5 bg-black/60 border border-zinc-800 px-3 py-1 rounded-full text-xs font-bold text-yellow-500 backdrop-blur-md">
-            <span>🪙 {playerData.gold}G</span>
+          <div className="flex gap-1.5 bg-black/60 border border-zinc-800 px-3 py-1 rounded-full text-xs font-bold backdrop-blur-md">
+            <span className="text-purple-400">◆ {parseFloat(fableBalance).toFixed(2)} FABLE</span>
             <span className="text-zinc-500">|</span>
             <span className="text-emerald-400 flex items-center gap-1 font-bold">
               ◈ {parseFloat(avaxBalance).toFixed(4)} AVAX
@@ -246,13 +242,6 @@ export default function HUD({
             <span>{currentZone}</span>
           </div>
 
-          {playerData.ubiBuffActive && (
-            <div className="flex items-center gap-1 bg-linear-to-r from-yellow-600/80 to-amber-600/80 border border-yellow-500/30 px-2 py-0.5 rounded text-[9px] text-yellow-100 font-bold animate-pulse">
-              <Flame size={10} />
-              <span>+50% XP/Gold Buff</span>
-            </div>
-          )}
-          
           {playerData.pendingRewards && playerData.pendingRewards.length > 0 && (
             <div className="flex items-center gap-1 bg-linear-to-r from-green-600/80 to-emerald-600/80 border border-green-500/30 px-2 py-0.5 rounded text-[9px] text-green-100 font-bold animate-pulse">
               <Award size={10} />
@@ -325,6 +314,10 @@ export default function HUD({
           playerData={playerData}
           setPlayerData={setPlayerData}
           walletAddress={walletAddress || playerData?.wallet_address || undefined}
+          walletConnected={walletConnected}
+          connectWallet={connectWallet}
+          fableBalance={fableBalance}
+          refreshBalance={refreshBalance}
           onContinue={() => setInLevelClear(false)}
         />
       )}

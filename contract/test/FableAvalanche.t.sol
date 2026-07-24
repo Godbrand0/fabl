@@ -7,6 +7,7 @@ import "../src/FableLeaderboard.sol";
 import "../src/FableGameSession.sol";
 import "../src/FableNFT.sol";
 import "../src/FableMarket.sol";
+import "../src/FableShop.sol";
 
 contract FableAvalancheTest is Test {
     FableToken       token;
@@ -14,24 +15,34 @@ contract FableAvalancheTest is Test {
     FableGameSession session;
     FableNFT         nft;
     FableMarket      market;
+    FableShop        shop;
 
     address admin      = makeAddr("admin");
-    address gameServer  = makeAddr("gameServer");
+    uint256 gameServerKey = 0xA11CE;
+    address gameServer  = vm.addr(gameServerKey);
     address treasury    = makeAddr("treasury");
     address player1     = makeAddr("player1");
     address player2     = makeAddr("player2");
+
+    uint256 IRON_SWORD; // weaponId, registered in setUp
 
     function setUp() public {
         vm.startPrank(admin);
         token = new FableToken(admin);
         leaderboard = new FableLeaderboard(admin);
         session = new FableGameSession(address(token), address(leaderboard), gameServer, admin);
-        nft = new FableNFT(address(token), admin, treasury);
+        nft = new FableNFT(admin, treasury);
         market = new FableMarket(address(nft), treasury);
+        shop = new FableShop(address(token), admin);
 
         token.setGameContract(address(session), true);
-        token.setGameContract(address(nft), true);
+        token.setGameContract(address(shop), true);
         leaderboard.setGameContract(address(session));
+
+        IRON_SWORD = nft.registerWeapon("Iron Sword", "Sword", 12, 12, 0.05 ether);
+
+        shop.setItemPrice(1, 25 ether); // minor potion
+        shop.setStatPointPrices(15 ether, 30 ether);
         vm.stopPrank();
     }
 
@@ -51,35 +62,62 @@ contract FableAvalancheTest is Test {
         token.mintReward(player1, 1 ether);
     }
 
-    // ── FableGameSession: full run lifecycle ────────────────────────────────
+    // ── FableGameSession: enter + server-attested claim ─────────────────────
+    function _signClear(address player, uint256 zoneId, uint256 amount, uint256 deadline)
+        internal view returns (bytes memory)
+    {
+        bytes32 hash = keccak256(
+            abi.encodePacked(address(session), block.chainid, player, zoneId, amount, deadline)
+        );
+        bytes32 ethSignedHash = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", hash));
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(gameServerKey, ethSignedHash);
+        return abi.encodePacked(r, s, v);
+    }
+
     function test_FullZoneClearMintsFableAndSubmitsScore() public {
         vm.prank(player1);
-        bytes32 sessionId = session.enterZone(1); // free zone
+        session.enterZone(1); // free zone
 
-        vm.prank(gameServer);
-        session.checkpoint(sessionId, 50, 20 ether);
-
-        vm.prank(gameServer);
-        session.checkpoint(sessionId, 80, 45 ether);
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes memory sig = _signClear(player1, 1, 45 ether, deadline);
 
         vm.prank(player1);
-        session.clearZone(sessionId);
+        session.clearZone(1, 45 ether, deadline, sig);
 
         assertEq(token.balanceOf(player1), 45 ether);
         assertEq(leaderboard.playerBestScore(leaderboard.currentWeek(), player1), 45 ether);
     }
 
-    function test_DeathSavesHalfEarnedFable() public {
-        vm.prank(player1);
-        bytes32 sessionId = session.enterZone(1);
-
-        vm.prank(gameServer);
-        session.checkpoint(sessionId, 40, 20 ether);
+    function test_ClearZoneRejectsBadSignature() public {
+        uint256 deadline = block.timestamp + 1 hours;
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(0xBAD, keccak256("wrong"));
+        bytes memory sig = abi.encodePacked(r, s, v);
 
         vm.prank(player1);
-        session.sessionAborted(sessionId);
+        vm.expectRevert("FableGameSession: bad attestation");
+        session.clearZone(1, 45 ether, deadline, sig);
+    }
 
-        assertEq(token.balanceOf(player1), 10 ether);
+    function test_ClearZoneRejectsExpiredAttestation() public {
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes memory sig = _signClear(player1, 1, 45 ether, deadline);
+
+        vm.warp(deadline + 1);
+        vm.prank(player1);
+        vm.expectRevert("FableGameSession: attestation expired");
+        session.clearZone(1, 45 ether, deadline, sig);
+    }
+
+    function test_ClearZoneRejectsDoubleClaim() public {
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes memory sig = _signClear(player1, 1, 45 ether, deadline);
+
+        vm.prank(player1);
+        session.clearZone(1, 45 ether, deadline, sig);
+
+        vm.prank(player1);
+        vm.expectRevert("FableGameSession: already claimed");
+        session.clearZone(1, 45 ether, deadline, sig);
     }
 
     function test_EliteZoneEntryBurnsFable() public {
@@ -95,17 +133,14 @@ contract FableAvalancheTest is Test {
         assertEq(token.balanceOf(player1), 0);
     }
 
-    // ── FableNFT + FableMarket: trades settle in AVAX, never FABLE ─────────────
-    function test_ForgeThenSellWeaponForAvax() public {
-        // Player earns and forges a common weapon (burns 50 FABLE)
-        vm.prank(address(session));
-        token.mintReward(player1, 50 ether);
+    // ── FableNFT + FableMarket: trades settle in AVAX only ──────────────────
+    function test_BuyThenSellWeaponForAvax() public {
+        vm.deal(player1, 1 ether);
 
         vm.prank(player1);
-        uint256 tokenId = nft.mintWeapon("Iron Sword", FableNFT.Rarity.COMMON, 12, 10, "Sword");
+        uint256 tokenId = nft.mintWeaponWithAvax{ value: 0.05 ether }(IRON_SWORD);
 
         assertEq(nft.ownerOf(tokenId), player1);
-        assertEq(token.balanceOf(player1), 0);
 
         // List for 2 AVAX
         vm.startPrank(player1);
@@ -119,17 +154,15 @@ contract FableAvalancheTest is Test {
         market.buyNFT{ value: 2 ether }(tokenId);
 
         assertEq(nft.ownerOf(tokenId), player2);
-        assertEq(player1.balance, 1.9 ether);   // 95% to seller
-        assertEq(treasury.balance, 0.1 ether);  // 5% royalty
+        assertEq(player1.balance, 0.95 ether + 1.9 ether); // 1 AVAX - 0.05 mint cost, + 95% resale
+        assertEq(treasury.balance, 0.05 ether + 0.1 ether); // mint price + 5% resale royalty
     }
 
     function test_TavernShopMintsWeaponForAvaxToTreasury() public {
         vm.deal(player1, 1 ether);
 
         vm.prank(player1);
-        uint256 tokenId = nft.mintWeaponWithAvax{ value: 0.05 ether }(
-            "Iron Sword", FableNFT.Rarity.COMMON, 12, 10, "Sword"
-        );
+        uint256 tokenId = nft.mintWeaponWithAvax{ value: 0.05 ether }(IRON_SWORD);
 
         assertEq(nft.ownerOf(tokenId), player1);
         assertEq(treasury.balance, 0.05 ether);
@@ -140,14 +173,20 @@ contract FableAvalancheTest is Test {
         vm.deal(player1, 1 ether);
         vm.prank(player1);
         vm.expectRevert("FableNFT: wrong AVAX amount");
-        nft.mintWeaponWithAvax{ value: 0.01 ether }("Iron Sword", FableNFT.Rarity.COMMON, 12, 10, "Sword");
+        nft.mintWeaponWithAvax{ value: 0.01 ether }(IRON_SWORD);
+    }
+
+    function test_MintWeaponRejectsUnknownWeaponId() public {
+        vm.deal(player1, 1 ether);
+        vm.prank(player1);
+        vm.expectRevert("FableNFT: unknown weapon");
+        nft.mintWeaponWithAvax{ value: 0.05 ether }(999);
     }
 
     function test_BuyNFTRejectsWrongAvaxAmount() public {
-        vm.prank(address(session));
-        token.mintReward(player1, 50 ether);
+        vm.deal(player1, 1 ether);
         vm.prank(player1);
-        uint256 tokenId = nft.mintWeapon("Iron Sword", FableNFT.Rarity.COMMON, 12, 10, "Sword");
+        uint256 tokenId = nft.mintWeaponWithAvax{ value: 0.05 ether }(IRON_SWORD);
 
         vm.startPrank(player1);
         nft.approve(address(market), tokenId);
@@ -158,6 +197,41 @@ contract FableAvalancheTest is Test {
         vm.prank(player2);
         vm.expectRevert("FableMarket: wrong AVAX amount");
         market.buyNFT{ value: 1 ether }(tokenId);
+    }
+
+    // ── FableShop: spend FABLE on consumables + stat points ─────────────────
+    function test_BuyItemBurnsFable() public {
+        vm.prank(address(session));
+        token.mintReward(player1, 25 ether);
+
+        vm.prank(player1);
+        shop.buyItem(1); // minor potion
+
+        assertEq(token.balanceOf(player1), 0);
+    }
+
+    function test_BuyItemRejectsUnknownItem() public {
+        vm.prank(address(session));
+        token.mintReward(player1, 100 ether);
+
+        vm.prank(player1);
+        vm.expectRevert("FableShop: unknown item");
+        shop.buyItem(999);
+    }
+
+    function test_StatPointFirstCheaperThanSubsequent() public {
+        vm.prank(address(session));
+        token.mintReward(player1, 100 ether);
+
+        vm.prank(player1);
+        shop.buyStatPoint(); // costs 15
+        assertEq(token.balanceOf(player1), 85 ether);
+
+        vm.prank(player1);
+        shop.buyStatPoint(); // costs 30
+        assertEq(token.balanceOf(player1), 55 ether);
+
+        assertEq(shop.statPointsBought(player1), 2);
     }
 
     // ── FableLeaderboard: weekly payout ──────────────────────────────────────

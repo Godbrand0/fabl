@@ -8,39 +8,33 @@ interface IFableLeaderboard {
 }
 
 /**
- * FableGameSession — tracks a zone run and pays out FABLE at its end.
+ * FableGameSession — two player-signed transactions per level: one to
+ * enter a zone, one to claim its reward on clear. Kill counts, loot, and
+ * run progress stay in the game's off-chain database; the only on-chain
+ * state is "did this player already claim this zone's reward."
  *
- * enterZone / clearZone / sessionAborted are signed by the player.
- * checkpoint is signed by the game server (Privy delegate) with no
- * user popup, so kills mid-run don't interrupt gameplay.
+ * enterZone is signed by the player directly — no server involvement.
+ *
+ * clearZone is also signed by the player, but only succeeds if it carries
+ * a valid signature from the trusted `gameServer` key attesting
+ * (player, zoneId, amount, deadline). The game server issues that
+ * signature once its own zone-clear check (Supabase-backed) passes,
+ * without ever holding a session on-chain or paying the gas itself.
  */
 contract FableGameSession {
     IFableToken       public fable;
     IFableLeaderboard public leaderboard;
     address public admin;
-    address public gameServer; // Privy server wallet — signs checkpoints only
+    address public gameServer; // signs zone-clear attestations off-chain
 
     mapping(uint256 => uint256) public zoneCosts; // zoneId => FABLE entry cost
+    mapping(address => mapping(uint256 => bool)) public claimed; // player => zoneId => claimed
 
-    struct Session {
-        address player;
-        uint256 zoneId;
-        uint256 startTime;
-        uint256 earned;
-        uint256 checkpointProgress; // 0-100
-        bool active;
-    }
-
-    mapping(bytes32 => Session) public sessions;
-
-    event SessionStarted(bytes32 indexed sessionId, address indexed player, uint256 zoneId);
-    event Checkpoint(bytes32 indexed sessionId, uint256 progress, uint256 earned);
-    event ZoneCleared(bytes32 indexed sessionId, address indexed player, uint256 fableEarned);
-    event SessionAborted(bytes32 indexed sessionId, address indexed player, uint256 fableSaved);
+    event ZoneEntered(address indexed player, uint256 indexed zoneId);
+    event ZoneCleared(address indexed player, uint256 indexed zoneId, uint256 fableEarned);
     event ZoneCostSet(uint256 indexed zoneId, uint256 cost);
     event GameServerSet(address indexed gameServer);
 
-    modifier onlyGameServer() { require(msg.sender == gameServer, "FableGameSession: only game server"); _; }
     modifier onlyAdmin() { require(msg.sender == admin, "FableGameSession: not admin"); _; }
 
     constructor(address _fable, address _leaderboard, address _gameServer, address _admin) {
@@ -48,7 +42,7 @@ contract FableGameSession {
         leaderboard = IFableLeaderboard(_leaderboard);
         gameServer = _gameServer;
         admin = _admin;
-        zoneCosts[1] = 0; // Ember Fields (Lv1-2): free entry
+        // Actual per-zone costs are set post-deploy via setZoneCost (see DeployFable.s.sol)
     }
 
     // ── Admin ─────────────────────────────────────────────────────────────────
@@ -63,65 +57,45 @@ contract FableGameSession {
     }
 
     // ── USER SIGNS: start a run, burning the zone entry fee if any ─────────────
-    function enterZone(uint256 zoneId) external returns (bytes32) {
+    function enterZone(uint256 zoneId) external {
         uint256 cost = zoneCosts[zoneId];
         if (cost > 0) {
             fable.burnFrom(msg.sender, cost);
         }
-
-        bytes32 sessionId = keccak256(abi.encodePacked(msg.sender, zoneId, block.timestamp, block.prevrandao));
-
-        sessions[sessionId] = Session({
-            player: msg.sender,
-            zoneId: zoneId,
-            startTime: block.timestamp,
-            earned: 0,
-            checkpointProgress: 0,
-            active: true
-        });
-
-        emit SessionStarted(sessionId, msg.sender, zoneId);
-        return sessionId;
+        emit ZoneEntered(msg.sender, zoneId);
     }
 
-    // ── GAME SERVER SIGNS: silent mid-run progress + earned FABLE update ───────
-    function checkpoint(bytes32 sessionId, uint256 progress, uint256 totalEarned) external onlyGameServer {
-        Session storage s = sessions[sessionId];
-        require(s.active, "FableGameSession: session not active");
-        require(progress > s.checkpointProgress, "FableGameSession: progress must increase");
-        require(progress <= 100, "FableGameSession: progress max 100");
+    // ── USER SIGNS: claim a zone's reward using the server's attestation ───────
+    function clearZone(uint256 zoneId, uint256 amount, uint256 deadline, bytes calldata signature) external {
+        require(block.timestamp <= deadline, "FableGameSession: attestation expired");
+        require(!claimed[msg.sender][zoneId], "FableGameSession: already claimed");
 
-        s.earned = totalEarned;
-        s.checkpointProgress = progress;
+        bytes32 hash = keccak256(
+            abi.encodePacked(address(this), block.chainid, msg.sender, zoneId, amount, deadline)
+        );
+        require(_recoverSigner(hash, signature) == gameServer, "FableGameSession: bad attestation");
 
-        emit Checkpoint(sessionId, progress, totalEarned);
+        claimed[msg.sender][zoneId] = true;
+
+        if (amount > 0) fable.mintReward(msg.sender, amount);
+        leaderboard.submitScore(msg.sender, amount, zoneId);
+
+        emit ZoneCleared(msg.sender, zoneId, amount);
     }
 
-    // ── USER SIGNS: zone cleared — mints earned FABLE, submits leaderboard score ─
-    function clearZone(bytes32 sessionId) external {
-        Session storage s = sessions[sessionId];
-        require(s.player == msg.sender, "FableGameSession: not your session");
-        require(s.active, "FableGameSession: session not active");
-        require(s.checkpointProgress >= 75, "FableGameSession: zone not cleared");
+    // ── EIP-191 personal_sign recovery (no external deps) ───────────────────────
+    function _recoverSigner(bytes32 hash, bytes calldata signature) internal pure returns (address) {
+        require(signature.length == 65, "FableGameSession: bad signature length");
 
-        s.active = false;
-        if (s.earned > 0) fable.mintReward(msg.sender, s.earned);
-        leaderboard.submitScore(msg.sender, s.earned, s.zoneId);
+        bytes32 r; bytes32 s; uint8 v;
+        assembly {
+            r := calldataload(signature.offset)
+            s := calldataload(add(signature.offset, 32))
+            v := byte(0, calldataload(add(signature.offset, 64)))
+        }
+        if (v < 27) v += 27;
 
-        emit ZoneCleared(sessionId, msg.sender, s.earned);
-    }
-
-    // ── USER SIGNS: death — saves 50% of earned FABLE ───────────────────────────
-    function sessionAborted(bytes32 sessionId) external {
-        Session storage s = sessions[sessionId];
-        require(s.player == msg.sender, "FableGameSession: not your session");
-        require(s.active, "FableGameSession: session not active");
-
-        s.active = false;
-        uint256 saved = s.earned / 2;
-
-        if (saved > 0) fable.mintReward(msg.sender, saved);
-
-        emit SessionAborted(sessionId, msg.sender, saved);
+        bytes32 ethSignedHash = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", hash));
+        return ecrecover(ethSignedHash, v, r, s);
     }
 }

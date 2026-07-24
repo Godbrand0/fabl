@@ -35,14 +35,12 @@ export default abstract class CombatScene extends Phaser.Scene {
   protected enemies!: Phaser.Physics.Arcade.Group;
   protected playerProjectiles!: Phaser.Physics.Arcade.Group;
   protected enemyProjectiles!: Phaser.Physics.Arcade.Group;
-  protected coins!: Phaser.Physics.Arcade.Group;
   protected lootItems!: Phaser.Physics.Arcade.Group;
 
   // Player Stats
   protected playerHP = 100;
   protected playerMaxHP = 100;
   protected playerXP = 0;
-  protected playerGold = 50;
   protected playerLevel = 1;
   protected playerDmg = 32;
   private playerDefense = 0;
@@ -112,7 +110,6 @@ export default abstract class CombatScene extends Phaser.Scene {
         this.playerHP = data.hp ?? 100;
         this.playerMaxHP = data.maxHp ?? 100;
         this.playerXP = data.xp ?? 0;
-        this.playerGold = data.gold ?? 50;
         this.playerLevel = data.level ?? 1;
         const str = data.stats?.strength || 0;
         const agi = data.stats?.agility || 0;
@@ -143,7 +140,6 @@ export default abstract class CombatScene extends Phaser.Scene {
     this.enemies = this.physics.add.group();
     this.playerProjectiles = this.physics.add.group();
     this.enemyProjectiles = this.physics.add.group();
-    this.coins = this.physics.add.group();
     this.lootItems = this.physics.add.group();
 
     // Player — setCollideWorldBounds uses physics.world.setBounds set above
@@ -155,7 +151,6 @@ export default abstract class CombatScene extends Phaser.Scene {
     this.cameras.main.startFollow(this.player, true, 1, 1);
 
     // Overlaps / collisions
-    this.physics.add.overlap(this.player, this.coins, this.collectCoin as any, undefined, this);
     this.physics.add.overlap(this.player, this.lootItems, this.collectLoot as any, undefined, this);
     this.physics.add.overlap(this.playerProjectiles, this.enemies, this.damageEnemy as any, undefined, this);
     this.physics.add.overlap(this.enemyProjectiles, this.player, this.damagePlayer as any, undefined, this);
@@ -631,14 +626,6 @@ export default abstract class CombatScene extends Phaser.Scene {
     const isBoss = enemy.isBoss;
     const points = enemy.getData('points') || 10;
 
-    const numCoins = isBoss ? 8 : Phaser.Math.Between(1, 3);
-    for (let i = 0; i < numCoins; i++) {
-      const coin = this.coins.create(enemy.x, enemy.y, 'coin') as any;
-      coin.setVelocity(Phaser.Math.Between(-70, 70), Phaser.Math.Between(-70, 70));
-      coin.setDrag(120);
-      coin.setDepth(4);
-    }
-
     if (isBoss || Math.random() < 0.25) {
       const lootKey = enemy.texture.key === 'poison_slime' ? 'scorpion' : 'fire_item';
       const loot = this.lootItems.create(enemy.x, enemy.y, 'coin') as any;
@@ -727,15 +714,6 @@ export default abstract class CombatScene extends Phaser.Scene {
     audioManager.playSfx('playerDie');
     audioManager.stopMusic();
     gameBridge.emit('player_died', { zone: this.scene.key });
-  }
-
-  private collectCoin(player: any, coin: any) {
-    const gold = Phaser.Math.Between(2, 5);
-    this.playerGold += gold;
-    audioManager.playSfx('coin');
-    this.showFloatingText(coin.x, coin.y - 8, `+${gold}G`, '#FFD700');
-    gameBridge.emit('player_gold_changed', gold);
-    coin.destroy();
   }
 
   private collectLoot(player: any, loot: any) {

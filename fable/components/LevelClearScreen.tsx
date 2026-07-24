@@ -1,9 +1,11 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import gameBridge from '../game/systems/GameBridge';
-import { Heart, ArrowRight, CheckCircle2 } from 'lucide-react';
-import { ZONE_LEVEL_REWARDS } from '../lib/nft';
+import { Heart, ArrowRight, CheckCircle2, Loader2 } from 'lucide-react';
+import { ZONE_LEVEL_IDS, ZONE_LEVEL_REWARDS, ZONE_ENTRY_FEE, FABLE_ITEMS } from '../lib/nft';
+import { avalancheService } from '../lib/avalanche';
+import { dbService } from '../lib/supabaseClient';
 
 const ZONE_PROGRESSION: Record<string, string> = {
   SunfallDunesScene: 'EmberFieldsScene',
@@ -18,56 +20,130 @@ const ZONE_NAMES: Record<string, string> = {
   ObsidianPeakScene: 'Obsidian Peak',
 };
 
-const POTIONS = [
-  { id: 'minor',   name: 'Minor Potion',  cost: 15, hp: 30,   full: false, color: 'border-green-500',  activeBg: 'bg-green-950/60',  label: '+30 HP' },
-  { id: 'greater', name: 'Greater Potion', cost: 30, hp: 75,   full: false, color: 'border-blue-500',   activeBg: 'bg-blue-950/60',   label: '+75 HP' },
-  { id: 'mega',    name: 'Mega Elixir',    cost: 60, hp: 9999, full: true,  color: 'border-purple-500', activeBg: 'bg-purple-950/60', label: 'Full HP' },
-];
+const POTIONS = FABLE_ITEMS.filter(i => i.heal || i.fullHeal);
 
 interface Props {
   clearedZone: string;
   playerData: any;
   setPlayerData: React.Dispatch<React.SetStateAction<any>>;
   walletAddress?: string;
+  walletConnected: boolean;
+  connectWallet: () => Promise<void>;
+  fableBalance: string;
+  refreshBalance: () => Promise<void>;
   onContinue: () => void;
 }
 
-export default function LevelClearScreen({ clearedZone, playerData, setPlayerData, walletAddress, onContinue }: Props) {
+export default function LevelClearScreen({
+  clearedZone, playerData, setPlayerData,
+  walletAddress, walletConnected, connectWallet, fableBalance, refreshBalance,
+  onContinue,
+}: Props) {
   const [selected, setSelected]     = useState<string | null>(null);
   const [justBought, setJustBought] = useState<string | null>(null);
+  const [buyingPotion, setBuyingPotion] = useState(false);
+  const [claiming, setClaiming]     = useState(false);
+  const [claimed, setClaimed]       = useState(false);
+  const [entering, setEntering]     = useState(false);
 
   const nextScene    = ZONE_PROGRESSION[clearedZone];
   const nextZoneName = nextScene ? ZONE_NAMES[nextScene] : '';
   const isFinalZone  = clearedZone === 'ObsidianPeakScene';
   const zoneReward   = ZONE_LEVEL_REWARDS[clearedZone] ?? 0;
-
-  // Add reward to pending
-  useEffect(() => {
-    if (!zoneReward) return;
-    setPlayerData((prev: any) => {
-      const pending = [...(prev.pendingRewards || [])];
-      if (!pending.includes(clearedZone)) {
-        pending.push(clearedZone);
-      }
-      return { ...prev, pendingRewards: pending };
-    });
-  }, [clearedZone, zoneReward, setPlayerData]);
+  const alreadyPending = (playerData.pendingRewards || []).includes(clearedZone);
 
   const selectedPotion = POTIONS.find(p => p.id === selected) ?? null;
-  const canAfford = selectedPotion ? playerData.gold >= selectedPotion.cost : false;
+  const canAfford = selectedPotion ? parseFloat(fableBalance) >= selectedPotion.fableCost : false;
 
-  const buySelected = () => {
-    if (!selectedPotion || !canAfford) return;
-    setPlayerData((prev: any) => {
-      const newHP = selectedPotion.full ? prev.maxHp : Math.min(prev.maxHp, prev.hp + selectedPotion.hp);
-      return { ...prev, gold: prev.gold - selectedPotion.cost, hp: newHP };
-    });
-    setJustBought(selectedPotion.id);
-    setSelected(null);
+  // Player-signed: spend FABLE on a potion via FableShop.buyItem — real burn, real tx.
+  const buySelected = async () => {
+    if (!selectedPotion || !canAfford || buyingPotion) return;
+    setBuyingPotion(true);
+    try {
+      let addr = walletAddress;
+      if (!walletConnected || !addr) {
+        await connectWallet();
+        addr = (await avalancheService.getConnectedAddress()) ?? '';
+      }
+      if (!addr) return;
+
+      const success = await avalancheService.buyShopItem(addr, selectedPotion.itemId);
+      if (!success) return;
+
+      await refreshBalance();
+      setPlayerData((prev: any) => {
+        const newHP = selectedPotion.fullHeal ? prev.maxHp : Math.min(prev.maxHp, prev.hp + (selectedPotion.heal ?? 0));
+        const updated = { ...prev, hp: newHP };
+        dbService.savePlayer(updated);
+        return updated;
+      });
+      setJustBought(selectedPotion.id);
+      setSelected(null);
+    } catch (err) {
+      console.error('buySelected failed:', err);
+    } finally {
+      setBuyingPotion(false);
+    }
   };
 
-  const handleContinue = () => {
+  // Player-signed: claim this zone's FABLE reward using a game-server attestation.
+  // Falls back to `pendingRewards` (claimable later from the Bank) if the tx fails or is skipped.
+  const claimReward = async () => {
+    if (claiming || claimed || !zoneReward) return;
+    setClaiming(true);
+    try {
+      let addr = walletAddress;
+      if (!walletConnected || !addr) {
+        await connectWallet();
+        addr = (await avalancheService.getConnectedAddress()) ?? '';
+      }
+      if (!addr) throw new Error('No wallet connected');
+
+      const res = await fetch('/api/attest-zone-clear', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ walletAddress: addr, zone: clearedZone }),
+      });
+      const attestation = await res.json();
+      if (!res.ok) throw new Error(attestation.error || 'Attestation failed');
+
+      const zoneId = ZONE_LEVEL_IDS[clearedZone];
+      const success = await avalancheService.clearZone(
+        addr, zoneId, BigInt(attestation.amount), attestation.deadline, attestation.signature,
+      );
+      if (!success) throw new Error('Claim tx failed');
+
+      setClaimed(true);
+      await refreshBalance();
+    } catch (err) {
+      console.error('claimReward failed, deferring to Bank:', err);
+      // Fall back to the deferred claim path so the reward isn't lost.
+      setPlayerData((prev: any) => {
+        const pending = [...(prev.pendingRewards || [])];
+        if (!pending.includes(clearedZone)) pending.push(clearedZone);
+        return { ...prev, pendingRewards: pending };
+      });
+    } finally {
+      setClaiming(false);
+    }
+  };
+
+  const handleContinue = async () => {
     if (nextScene) {
+      // Player-signed: enter the next zone. Best-effort — never block progression on it.
+      setEntering(true);
+      try {
+        let addr = walletAddress;
+        if (!walletConnected || !addr) {
+          await connectWallet();
+          addr = (await avalancheService.getConnectedAddress()) ?? '';
+        }
+        if (addr) await avalancheService.enterZone(addr, ZONE_LEVEL_IDS[nextScene]);
+      } catch (err) {
+        console.error('enterZone failed (continuing anyway):', err);
+      } finally {
+        setEntering(false);
+      }
       gameBridge.emit('proceed_to_next_zone', { targetScene: nextScene });
     } else {
       // Final zone cleared — nothing left to fight, send the player to the menu.
@@ -91,14 +167,25 @@ export default function LevelClearScreen({ clearedZone, playerData, setPlayerDat
           <p className="text-zinc-400 text-xs">{ZONE_NAMES[clearedZone] ?? clearedZone} conquered</p>
         </div>
 
-        {/* G$ Reward Banner */}
+        {/* FABLE Reward Banner */}
         {zoneReward > 0 && (
           <div className="rounded-xl border-2 px-4 py-3 flex items-center gap-3 transition-all border-emerald-500 bg-emerald-950/40">
-            <span className="text-2xl shrink-0">💲</span>
+            <span className="text-2xl shrink-0">◈</span>
             <div className="flex-1 min-w-0">
-              <p className="text-[12px] font-extrabold text-emerald-400">+{zoneReward.toLocaleString()} G$ added to Bank!</p>
-              <p className="text-[10px] text-zinc-400">Visit the Bank page to claim.</p>
+              <p className="text-[12px] font-extrabold text-emerald-400">+{zoneReward.toLocaleString()} FABLE earned!</p>
+              <p className="text-[10px] text-zinc-400">
+                {claimed ? 'Claimed to your wallet.' : alreadyPending ? 'Already pending — claim it from the Bank.' : 'Sign to claim it now, or skip and claim later from the Bank.'}
+              </p>
             </div>
+            {!claimed && !alreadyPending && (
+              <button
+                onClick={claimReward}
+                disabled={claiming}
+                className="shrink-0 flex items-center gap-1.5 bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 text-white text-[10px] font-bold px-3 py-2 rounded-lg active:scale-95 transition-all"
+              >
+                {claiming ? <Loader2 size={12} className="animate-spin" /> : 'Claim'}
+              </button>
+            )}
           </div>
         )}
 
@@ -118,13 +205,13 @@ export default function LevelClearScreen({ clearedZone, playerData, setPlayerDat
         {/* Potion Shop */}
         <div className="flex flex-col gap-2">
           <div className="flex items-center justify-between">
-            <p className="text-[10px] text-yellow-500 font-bold uppercase tracking-widest">Potion Shop</p>
-            <span className="text-[10px] text-yellow-400 font-bold">{playerData.gold} 🪙</span>
+            <p className="text-[10px] text-purple-400 font-bold uppercase tracking-widest">Potion Shop</p>
+            <span className="text-[10px] text-purple-300 font-bold">{parseFloat(fableBalance).toFixed(2)} FABLE</span>
           </div>
 
           <div className="grid grid-cols-3 gap-2">
             {POTIONS.map(p => {
-              const affordable  = playerData.gold >= p.cost;
+              const affordable  = parseFloat(fableBalance) >= p.fableCost;
               const isSelected  = selected === p.id;
               const wasBought   = justBought === p.id;
               return (
@@ -133,13 +220,13 @@ export default function LevelClearScreen({ clearedZone, playerData, setPlayerDat
                   onClick={() => setSelected(isSelected ? null : p.id)}
                   disabled={!affordable}
                   className={`flex flex-col items-center gap-1.5 p-2.5 rounded-xl border-2 text-center transition-all select-none
-                    ${isSelected ? `${p.activeBg} ${p.color} scale-105 shadow-lg` : affordable ? 'bg-zinc-900 border-zinc-700 hover:border-zinc-500' : 'bg-zinc-900/50 border-zinc-800 opacity-40 cursor-not-allowed'}
+                    ${isSelected ? 'bg-purple-950/60 border-purple-500 scale-105 shadow-lg' : affordable ? 'bg-zinc-900 border-zinc-700 hover:border-zinc-500' : 'bg-zinc-900/50 border-zinc-800 opacity-40 cursor-not-allowed'}
                   `}
                 >
                   <Heart size={18} className={isSelected ? 'text-white' : 'text-zinc-400'} />
                   <span className={`text-[9px] font-bold leading-tight ${isSelected ? 'text-white' : 'text-zinc-300'}`}>{p.name}</span>
-                  <span className={`text-[8px] ${isSelected ? 'text-zinc-200' : 'text-zinc-500'}`}>{p.label}</span>
-                  <span className={`text-[9px] font-bold ${affordable ? 'text-yellow-400' : 'text-red-400'}`}>{p.cost} 🪙</span>
+                  <span className={`text-[8px] ${isSelected ? 'text-zinc-200' : 'text-zinc-500'}`}>{p.effect}</span>
+                  <span className={`text-[9px] font-bold ${affordable ? 'text-purple-400' : 'text-red-400'}`}>{p.fableCost} FABLE</span>
                   {wasBought && <span className="text-[8px] text-green-400 font-bold">✓ Used</span>}
                 </button>
               );
@@ -150,14 +237,17 @@ export default function LevelClearScreen({ clearedZone, playerData, setPlayerDat
             {selectedPotion && (
               <button
                 onClick={buySelected}
-                disabled={!canAfford}
-                className={`w-full py-2.5 rounded-lg text-sm font-extrabold tracking-wider transition-all active:scale-95 mt-1
+                disabled={!canAfford || buyingPotion}
+                className={`w-full py-2.5 rounded-lg text-sm font-extrabold tracking-wider transition-all active:scale-95 mt-1 flex items-center justify-center gap-2
                   ${canAfford
-                    ? 'bg-linear-to-r from-green-600 to-emerald-600 hover:brightness-110 text-white shadow-lg shadow-green-900/30'
+                    ? 'bg-linear-to-r from-purple-600 to-purple-700 hover:brightness-110 text-white shadow-lg shadow-purple-900/30'
                     : 'bg-zinc-800 text-red-400 border border-red-900/40 cursor-not-allowed'
                   }`}
               >
-                {canAfford ? `Buy ${selectedPotion.name} — ${selectedPotion.cost} 🪙` : `Need ${selectedPotion.cost} 🪙`}
+                {buyingPotion
+                  ? <><Loader2 size={14} className="animate-spin" /> Signing…</>
+                  : canAfford ? `Buy ${selectedPotion.name} — ${selectedPotion.fableCost} FABLE` : `Need ${selectedPotion.fableCost} FABLE`
+                }
               </button>
             )}
           </div>
@@ -166,13 +256,19 @@ export default function LevelClearScreen({ clearedZone, playerData, setPlayerDat
         {/* Continue */}
         <button
           onClick={handleContinue}
-          className="w-full bg-linear-to-r from-yellow-500 to-amber-600 hover:brightness-110 text-black font-extrabold py-3.5 rounded-xl text-sm tracking-widest flex items-center justify-center gap-2 active:scale-95 transition-all shadow-lg shadow-amber-900/30"
+          disabled={entering}
+          className="w-full bg-linear-to-r from-yellow-500 to-amber-600 hover:brightness-110 disabled:opacity-60 text-black font-extrabold py-3.5 rounded-xl text-sm tracking-widest flex items-center justify-center gap-2 active:scale-95 transition-all shadow-lg shadow-amber-900/30"
         >
-          {isFinalZone
-            ? '🏆 Return to Menu'
-            : <><span>Enter {nextZoneName}</span><ArrowRight size={15} /></>
+          {entering
+            ? <><Loader2 size={15} className="animate-spin" /> <span>Signing…</span></>
+            : isFinalZone
+              ? '🏆 Return to Menu'
+              : <><span>Enter {nextZoneName}</span><ArrowRight size={15} /></>
           }
         </button>
+        {!isFinalZone && !entering && (
+          <p className="text-center text-[9px] text-zinc-600 -mt-2">Entry costs {ZONE_ENTRY_FEE} FABLE</p>
+        )}
       </div>
     </div>
   );

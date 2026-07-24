@@ -53,7 +53,7 @@ export default function StarterWeaponModal({ onClose }: Props) {
           </div>
 
           <p className="text-[10px] text-zinc-600 text-center leading-relaxed">
-            Visit the Tavern to buy a stronger weapon with G$ — those mint as real NFTs you own.
+            Visit the Tavern to buy a stronger weapon with AVAX — those mint as real NFTs you own.
           </p>
         </div>
       </div>

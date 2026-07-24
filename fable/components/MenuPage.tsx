@@ -15,7 +15,7 @@ import { dbService } from '../lib/supabaseClient';
 import { avalancheService } from '../lib/avalanche';
 import { audioManager } from '../lib/audio';
 import gameBridge from '../game/systems/GameBridge';
-import { AVAX_ITEMS } from '../lib/nft';
+import { AVAX_ITEMS, STAT_POINT_FIRST_COST, STAT_POINT_COST } from '../lib/nft';
 
 type Section = 'nav' | 'tavern' | 'bank' | 'marketplace' | 'stats' | 'profile' | 'codex' | 'loadout' | 'settings';
 
@@ -26,6 +26,7 @@ interface MenuPageProps {
   walletAddress: string;
   connectWallet: () => Promise<void>;
   avaxBalance: string;
+  fableBalance: string;
   refreshBalance: () => Promise<void>;
   onStartGame: () => void;
   /** Present only when opened as an in-game pause menu (game keeps running behind it). */
@@ -74,6 +75,7 @@ export default function MenuPage({
   walletAddress,
   connectWallet,
   avaxBalance,
+  fableBalance,
   refreshBalance,
   onStartGame,
   onClose,
@@ -85,6 +87,7 @@ export default function MenuPage({
   const [message, setMessage]         = useState<string | null>(null);
   const [selectedNft, setSelectedNft] = useState<any | null>(null);
   const [showStarterWeapon, setShowStarterWeapon] = useState(false);
+  const [allocatingStat, setAllocatingStat] = useState(false);
 
   const showFlashMessage = (msg: string) => {
     setMessage(msg);
@@ -126,31 +129,54 @@ export default function MenuPage({
     onClose ? onClose() : onStartGame();
   };
 
-  // ── Stat allocation (ported from HUD) ─────────────────────────────────────
+  // ── Stat allocation — spends FABLE on-chain via FableShop.buyStatPoint() ───
   const totalStatsInvested = (playerData.stats.strength || 0) + (playerData.stats.agility || 0)
     + (playerData.stats.defense || 0) + (playerData.stats.vitality || 0);
   const statCap  = (playerData.maxUnlockedZone || 1) * 5;
-  const statCost = totalStatsInvested < 5 ? 5 : 10;
+  const statCost = totalStatsInvested === 0 ? STAT_POINT_FIRST_COST : STAT_POINT_COST;
 
-  const allocateStat = (statName: 'strength' | 'agility' | 'defense' | 'vitality') => {
+  const allocateStat = async (statName: 'strength' | 'agility' | 'defense' | 'vitality') => {
+    if (allocatingStat) return;
     if (totalStatsInvested >= statCap) return;
-    if ((playerData.gold || 0) < statCost) return;
+    if (parseFloat(fableBalance) < statCost) {
+      showFlashMessage(`Need ${statCost} FABLE to allocate a stat point.`);
+      return;
+    }
 
-    setPlayerData((prev: any) => {
-      const stats = { ...prev.stats };
-      stats[statName] = (stats[statName] || 0) + 1;
-
-      let maxHp = prev.maxHp;
-      let hp = prev.hp;
-      if (statName === 'vitality') {
-        maxHp += 10;
-        hp = Math.min(prev.hp + 10, maxHp);
+    setAllocatingStat(true);
+    try {
+      let addr = walletAddress;
+      if (!walletConnected || !addr) {
+        await connectWallet();
+        addr = (await avalancheService.getConnectedAddress()) ?? '';
       }
+      if (!addr) { showFlashMessage('Connect your wallet to allocate stats.'); return; }
 
-      const updated = { ...prev, stats, maxHp, hp, gold: prev.gold - statCost };
-      dbService.savePlayer(updated);
-      return updated;
-    });
+      const success = await avalancheService.buyStatPoint(addr);
+      if (!success) { showFlashMessage('Stat purchase failed.'); return; }
+
+      await refreshBalance();
+      setPlayerData((prev: any) => {
+        const stats = { ...prev.stats };
+        stats[statName] = (stats[statName] || 0) + 1;
+
+        let maxHp = prev.maxHp;
+        let hp = prev.hp;
+        if (statName === 'vitality') {
+          maxHp += 10;
+          hp = Math.min(prev.hp + 10, maxHp);
+        }
+
+        const updated = { ...prev, stats, maxHp, hp };
+        dbService.savePlayer(updated);
+        return updated;
+      });
+    } catch (err) {
+      console.error('allocateStat failed:', err);
+      showFlashMessage('Stat purchase failed. Please try again.');
+    } finally {
+      setAllocatingStat(false);
+    }
   };
 
   // ── Loadout (ported from HUD) ──────────────────────────────────────────────
@@ -213,7 +239,7 @@ export default function MenuPage({
               <span className="text-[9px] text-zinc-500 uppercase tracking-widest">{playerData.name} · Lv {playerData.level}</span>
             </div>
             <div className="flex items-center gap-3">
-              <span className="text-xs font-bold text-yellow-500">🪙 {playerData.gold}G</span>
+              <span className="text-xs font-bold text-purple-400">◆ {parseFloat(fableBalance).toFixed(2)} FABLE</span>
               <span className="text-xs font-bold text-emerald-400">◈ {parseFloat(avaxBalance).toFixed(4)} AVAX</span>
               {onClose && (
                 <button
@@ -276,6 +302,7 @@ export default function MenuPage({
                   walletConnected={walletConnected}
                   connectWallet={connectWallet}
                   avaxBalance={avaxBalance}
+                  fableBalance={fableBalance}
                   refreshBalance={refreshBalance}
                   onLeave={() => setSection('nav')}
                   showMessage={showFlashMessage}
@@ -345,8 +372,8 @@ export default function MenuPage({
                   </div>
 
                   {totalStatsInvested < statCap ? (
-                    <div className="text-xs text-yellow-400 text-center">
-                      Each point costs <span className="font-bold">{statCost} 🪙</span> &nbsp;·&nbsp; You have <span className="font-bold">{playerData.gold || 0} 🪙</span>
+                    <div className="text-xs text-purple-300 text-center">
+                      Each point costs <span className="font-bold">{statCost} FABLE</span> &nbsp;·&nbsp; You have <span className="font-bold">{parseFloat(fableBalance).toFixed(2)} FABLE</span>
                     </div>
                   ) : (
                     <div className="text-xs text-zinc-500 text-center italic">
@@ -361,7 +388,7 @@ export default function MenuPage({
                       { key: 'defense',  name: '🔵 Defense',  desc: '-3 DMG taken per point', val: playerData.stats.defense },
                       { key: 'vitality', name: '🟡 Vitality', desc: '+10 Max HP per point', val: playerData.stats.vitality },
                     ].map(st => {
-                      const canBuy = totalStatsInvested < statCap && (playerData.gold || 0) >= statCost;
+                      const canBuy = totalStatsInvested < statCap && parseFloat(fableBalance) >= statCost && !allocatingStat;
                       return (
                         <div key={st.key} className="flex justify-between items-center bg-zinc-900/60 p-3 rounded-lg border border-zinc-800">
                           <div className="flex flex-col">
@@ -509,7 +536,7 @@ export default function MenuPage({
                       </div>
                     ) : (!playerData.nftItems || playerData.nftItems.length === 0) && (
                       <div className="text-center text-zinc-500 py-4 text-[11px]">
-                        Bag empty. Buy G$ items in the Tavern to mint NFTs.
+                        Bag empty. Buy weapons in the Tavern to mint NFTs.
                       </div>
                     )}
                   </div>
@@ -633,10 +660,17 @@ export default function MenuPage({
                         </div>
                         <span className="text-[9px] text-emerald-700">Avalanche C-Chain</span>
                       </div>
-                      <div className="bg-yellow-950/40 border border-yellow-800/40 rounded-xl p-3 flex flex-col gap-0.5">
-                        <span className="text-[9px] text-yellow-500 font-bold uppercase tracking-wider">Gold</span>
-                        <span className="text-[15px] font-extrabold text-yellow-300 leading-none mt-0.5">{playerData.gold.toLocaleString()}</span>
-                        <span className="text-[9px] text-yellow-700">In-game tokens 🪙</span>
+                      <div className="bg-purple-950/40 border border-purple-800/40 rounded-xl p-3 flex flex-col gap-0.5">
+                        <span className="text-[9px] text-purple-400 font-bold uppercase tracking-wider">FABLE Balance</span>
+                        <div className="flex items-center gap-1 mt-0.5">
+                          <span className="text-[15px] font-extrabold text-purple-300 leading-none">
+                            {parseFloat(fableBalance).toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                          </span>
+                          <button onClick={refreshBalance} className="text-purple-700 hover:text-purple-400 ml-auto">
+                            <RefreshCw size={9} />
+                          </button>
+                        </div>
+                        <span className="text-[9px] text-purple-700">Soulbound in-game currency</span>
                       </div>
                     </div>
 
@@ -665,12 +699,14 @@ export default function MenuPage({
 
                     <div className="flex flex-col gap-1.5">
                       <span className="text-[9px] text-zinc-500 font-bold uppercase tracking-wider">Active Buffs</span>
-                      {playerData.ubiBuffActive ? (
+                      {playerData.tempBuff ? (
                         <div className="flex items-center gap-2 bg-amber-950/40 border border-amber-700/40 rounded-lg px-2.5 py-1.5">
                           <Flame size={12} className="text-amber-400 shrink-0" />
                           <div className="flex flex-col">
-                            <span className="text-[10px] font-bold text-amber-300">+50% XP & Gold</span>
-                            <span className="text-[8px] text-amber-600">Daily login buff — 24 hours</span>
+                            <span className="text-[10px] font-bold text-amber-300">
+                              {playerData.tempBuff === 'damage' ? '+10% Damage' : '-15% Damage Taken'}
+                            </span>
+                            <span className="text-[8px] text-amber-600">Active this zone</span>
                           </div>
                         </div>
                       ) : (
@@ -704,7 +740,7 @@ export default function MenuPage({
                           })}
                         </div>
                       ) : (
-                        <p className="text-[10px] text-zinc-600 italic">No NFTs yet. Buy weapons or abilities with G$ in the Tavern.</p>
+                        <p className="text-[10px] text-zinc-600 italic">No NFTs yet. Buy weapons and abilities with AVAX in the Tavern.</p>
                       )}
                     </div>
                   </div>

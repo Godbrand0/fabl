@@ -25,7 +25,7 @@ export const TOUR_STEPS: TourStep[] = [
   },
   {
     target: null,
-    text: "Two shelves here. GOLD 🪙 buys consumables: a Minor Potion (+30 HP), a Greater Potion (+75 HP), the Mega Elixir (full heal) and temporary buffs. G$ buys the real treasures — weapons from the Iron Sword (+12 ATK) up to the Obsidian Greatsword (+60 ATK), plus special combat abilities. Everything bought with G$ is minted as an NFT you truly own in your wallet.",
+    text: "Two shelves here. Spend FABLE on Items — a Minor Potion (+30 HP), a Greater Potion (+75 HP), the Mega Elixir (full heal) and temporary buffs. The AVAX Shop is where the real treasures are — weapons and combat abilities that mint straight to your wallet as NFTs you truly own.",
   },
   {
     target: 'bank',
@@ -41,7 +41,7 @@ export const TOUR_STEPS: TourStep[] = [
   },
   {
     target: null,
-    text: "Four stats build your character: STRENGTH adds +2 damage per point, AGILITY fires 30ms faster per point, DEFENSE blocks 3 damage per point, and VITALITY adds +10 max HP per point. Points cost gold — 5🪙 each for your first five, 10🪙 after — and your cap grows by 5 with every zone you unlock. Spend wisely.",
+    text: "Four stats build your character: STRENGTH adds +2 damage per point, AGILITY fires 30ms faster per point, DEFENSE blocks 3 damage per point, and VITALITY adds +10 max HP per point. Points cost FABLE — cheaper for your very first point, flat after — and your cap grows by 5 with every zone you unlock. Spend wisely.",
   },
   {
     target: 'loadout',

@@ -33,6 +33,7 @@ export default function Home() {
   const [walletConnected, setWalletConnected] = useState(false);
   const [walletAddress, setWalletAddress]     = useState('');
   const [avaxBalance, setAvaxBalance]         = useState('0.0000');
+  const [fableBalance, setFableBalance]       = useState('0.00');
 
   // Auth screen state
   const [authTab, setAuthTab]       = useState<AuthTab>('google');
@@ -68,8 +69,12 @@ export default function Home() {
     const target = addr || walletAddress;
     if (!target) return;
     try {
-      const bal = await avalancheService.getAvaxBalance(target);
-      setAvaxBalance(bal);
+      const [avax, fable] = await Promise.all([
+        avalancheService.getAvaxBalance(target),
+        avalancheService.getFableBalance(target),
+      ]);
+      setAvaxBalance(avax);
+      setFableBalance(fable);
     } catch { /* ignore */ }
   };
 
@@ -171,7 +176,6 @@ export default function Home() {
       class:           'knight',
       level:           1,
       xp:              0,
-      gold:            100,
       maxHp,
       hp:              maxHp,
       stats,
@@ -182,8 +186,7 @@ export default function Home() {
       abilities:       [],
       inventory:       [],
       nftItems:        [],
-      ubiBuffActive:    false,
-      ubiBuffExpiresAt: null,
+      tempBuff:         null,
       activeAbility:    null,
       pendingRewards:   [],
       onboarded:        false,
@@ -411,6 +414,7 @@ export default function Home() {
         walletAddress={walletAddress}
         connectWallet={handleWalletSignIn}
         avaxBalance={avaxBalance}
+        fableBalance={fableBalance}
         refreshBalance={refreshBalance}
         onStartGame={() => setPhase('playing')}
       />
@@ -425,7 +429,11 @@ export default function Home() {
         playerData={playerData}
         setPlayerData={setPlayerData}
         walletAddress={walletAddress}
+        walletConnected={walletConnected}
+        connectWallet={handleWalletSignIn}
         avaxBalance={avaxBalance}
+        fableBalance={fableBalance}
+        refreshBalance={refreshBalance}
         onOpenMenu={() => { gameBridge.emit('game_pause'); audioManager.pauseMusic(); setShowPauseMenu(true); }}
       />
       {showPauseMenu && (
@@ -436,6 +444,7 @@ export default function Home() {
           walletAddress={walletAddress}
           connectWallet={handleWalletSignIn}
           avaxBalance={avaxBalance}
+          fableBalance={fableBalance}
           refreshBalance={refreshBalance}
           onStartGame={() => setPhase('playing')}
           onClose={() => { gameBridge.emit('game_resume'); audioManager.resumeMusic(); setShowPauseMenu(false); }}

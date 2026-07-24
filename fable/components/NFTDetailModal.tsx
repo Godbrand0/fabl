@@ -70,7 +70,7 @@ export default function NFTDetailModal({ nft, onClose }: Props) {
           {/* Price + mint info */}
           <div className="grid grid-cols-2 gap-2">
             <div className="bg-emerald-950/30 border border-emerald-800/40 rounded-lg p-2 flex flex-col gap-0.5">
-              <span className="text-[8px] text-emerald-500 font-bold uppercase tracking-wider">Mint Price</span>
+              <span className="text-[8px] text-emerald-500 font-bold uppercase tracking-wider">AVAX Price</span>
               <span className="text-xs font-extrabold text-emerald-300">{def.avaxCost} AVAX</span>
             </div>
             <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-2 flex flex-col gap-0.5">

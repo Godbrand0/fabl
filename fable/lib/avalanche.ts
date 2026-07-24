@@ -1,6 +1,6 @@
 import { createPublicClient, createWalletClient, custom, http, formatEther, parseEther, WalletClient } from 'viem';
 import { avalanche } from 'viem/chains';
-import { FABLE_NFT_ADDRESS, FABLE_NFT_ABI, FABLE_TOKEN_ADDRESS, FABLE_TOKEN_ABI, NftItem, Rarity } from './nft';
+import { FABLE_NFT_ADDRESS, FABLE_NFT_ABI, FABLE_TOKEN_ADDRESS, FABLE_TOKEN_ABI, FABLE_GAME_SESSION_ADDRESS, FABLE_GAME_SESSION_ABI, FABLE_SHOP_ADDRESS, FABLE_SHOP_ABI, NftItem } from './nft';
 import { getWeb3AuthProvider } from './web3auth';
 
 const AVALANCHE_RPC = process.env.NEXT_PUBLIC_AVALANCHE_RPC_URL || 'https://api.avax.network/ext/bc/C/rpc';
@@ -135,17 +135,10 @@ export const avalancheService = {
   },
 
   // Buy a Tavern Shop weapon/ability: pays AVAX straight to FableNFT, which
-  // mints the NFT to the buyer's wallet in the same transaction. NFTs are
-  // never bought with FABLE — only AVAX (Tavern Shop primary sale, or
-  // peer-to-peer resale on FableMarket later).
-  async buyItemWithAvax(
-    walletAddress: string,
-    itemId: string,
-    rarity: Rarity,
-    avaxCost: number,
-    weaponMeta: { attack?: number; weaponType: string },
-  ): Promise<NftItem | null> {
-    if (!this.hasInjectedProvider() && !this.getWalletClient()) {
+  // mints the NFT to the buyer's wallet in the same transaction. Every
+  // weapon is its own catalog entry with its own price — no rarity tiers.
+  async buyItemWithAvax(walletAddress: string, itemId: string, weaponId: number, avaxCost: number): Promise<NftItem | null> {
+    if (!this.getWalletClient()) {
       const currentBal = Number(await this.getAvaxBalance(walletAddress));
       if (currentBal < avaxCost) return null;
       localStorage.setItem(`fable_mock_avax_bal_${walletAddress.toLowerCase()}`, (currentBal - avaxCost).toFixed(4));
@@ -168,7 +161,7 @@ export const avalancheService = {
         address: FABLE_NFT_ADDRESS,
         abi: FABLE_NFT_ABI,
         functionName: 'mintWeaponWithAvax',
-        args: [itemId, rarity, BigInt(weaponMeta.attack ?? 0), BigInt(weaponMeta.attack ?? 0), weaponMeta.weaponType],
+        args: [BigInt(weaponId)],
         value,
       });
       const hash = await walletClient.writeContract(request);
@@ -189,6 +182,122 @@ export const avalancheService = {
     } catch (err) {
       console.error('buyItemWithAvax failed:', err);
       return null;
+    }
+  },
+
+  // Spend FABLE on a FableShop consumable/buff (potions, temp buffs).
+  async buyShopItem(walletAddress: string, itemId: number): Promise<boolean> {
+    if (!FABLE_SHOP_ADDRESS) return false;
+    if (!this.getWalletClient()) return false; // mock wallet — nothing on-chain to spend from
+
+    try {
+      await this.ensureAvalancheNetwork();
+      const walletClient = this.getWalletClient(walletAddress as `0x${string}`);
+      if (!walletClient) return false;
+
+      const { request } = await publicClient.simulateContract({
+        account: walletAddress as `0x${string}`,
+        address: FABLE_SHOP_ADDRESS,
+        abi: FABLE_SHOP_ABI,
+        functionName: 'buyItem',
+        args: [BigInt(itemId)],
+      });
+      const hash = await walletClient.writeContract(request);
+      const receipt = await publicClient.waitForTransactionReceipt({ hash });
+      return receipt.status === 'success';
+    } catch (err) {
+      console.error('buyShopItem failed:', err);
+      return false;
+    }
+  },
+
+  // Spend FABLE on a stat point (first point cheaper, every point after flat).
+  async buyStatPoint(walletAddress: string): Promise<boolean> {
+    if (!FABLE_SHOP_ADDRESS) return false;
+    if (!this.getWalletClient()) return false;
+
+    try {
+      await this.ensureAvalancheNetwork();
+      const walletClient = this.getWalletClient(walletAddress as `0x${string}`);
+      if (!walletClient) return false;
+
+      const { request } = await publicClient.simulateContract({
+        account: walletAddress as `0x${string}`,
+        address: FABLE_SHOP_ADDRESS,
+        abi: FABLE_SHOP_ABI,
+        functionName: 'buyStatPoint',
+      });
+      const hash = await walletClient.writeContract(request);
+      const receipt = await publicClient.waitForTransactionReceipt({ hash });
+      return receipt.status === 'success';
+    } catch (err) {
+      console.error('buyStatPoint failed:', err);
+      return false;
+    }
+  },
+
+  // Player-signed: enter a zone (burns the zone's FABLE cost, if any).
+  // Best-effort — callers should not block gameplay progression on this.
+  async enterZone(walletAddress: string, zoneId: number): Promise<boolean> {
+    if (!FABLE_GAME_SESSION_ADDRESS) return true; // not deployed yet — no-op success
+
+    if (!this.getWalletClient()) {
+      return true; // mock wallet in dev — nothing to sign
+    }
+
+    try {
+      await this.ensureAvalancheNetwork();
+      const walletClient = this.getWalletClient(walletAddress as `0x${string}`);
+      if (!walletClient) return false;
+
+      const { request } = await publicClient.simulateContract({
+        account: walletAddress as `0x${string}`,
+        address: FABLE_GAME_SESSION_ADDRESS,
+        abi: FABLE_GAME_SESSION_ABI,
+        functionName: 'enterZone',
+        args: [BigInt(zoneId)],
+      });
+      const hash = await walletClient.writeContract(request);
+      const receipt = await publicClient.waitForTransactionReceipt({ hash });
+      return receipt.status === 'success';
+    } catch (err) {
+      console.error('enterZone failed:', err);
+      return false;
+    }
+  },
+
+  // Player-signed: claim a zone's FABLE reward using the game server's attestation.
+  async clearZone(
+    walletAddress: string,
+    zoneId: number,
+    amountFableWei: bigint,
+    deadline: number,
+    signature: `0x${string}`,
+  ): Promise<boolean> {
+    if (!FABLE_GAME_SESSION_ADDRESS) return false;
+
+    if (!this.getWalletClient()) {
+      return false; // mock wallet in dev — nothing on-chain to claim from
+    }
+
+    try {
+      await this.ensureAvalancheNetwork();
+      const walletClient = this.getWalletClient(walletAddress as `0x${string}`);
+      if (!walletClient) return false;
+
+      const { request } = await publicClient.simulateContract({
+        account: walletAddress as `0x${string}`,
+        address: FABLE_GAME_SESSION_ADDRESS,
+        abi: FABLE_GAME_SESSION_ABI,
+        functionName: 'clearZone',
+        args: [BigInt(zoneId), amountFableWei, BigInt(deadline), signature],
+      });
+      const hash = await walletClient.writeContract(request);
+      const receipt = await publicClient.waitForTransactionReceipt({ hash });
+      return receipt.status === 'success';
+    } catch (err) {
+      console.error('clearZone failed:', err);
+      return false;
     }
   },
 };

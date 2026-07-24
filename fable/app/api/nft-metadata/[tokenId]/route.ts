@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createPublicClient, http } from 'viem';
 import { avalanche } from 'viem/chains';
-import { FABLE_NFT_ADDRESS, FABLE_NFT_ABI } from '../../../../lib/nft';
+import { FABLE_NFT_ADDRESS, FABLE_NFT_ABI, AVAX_ITEMS } from '../../../../lib/nft';
 
 const RPC = process.env.NEXT_PUBLIC_AVALANCHE_RPC_URL || 'https://api.avax.network/ext/bc/C/rpc';
 const publicClient = createPublicClient({ chain: avalanche, transport: http(RPC) });
@@ -86,12 +86,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
   }
 
   try {
-    // weapon.name is the item slug itself (e.g. "iron_sword") — set at mint time
-    const weapon = await publicClient.readContract({
-      address: FABLE_NFT_ADDRESS, abi: FABLE_NFT_ABI, functionName: 'weapons', args: [id],
+    const weaponId = await publicClient.readContract({
+      address: FABLE_NFT_ADDRESS, abi: FABLE_NFT_ABI, functionName: 'weaponOf', args: [id],
     });
-    const slug = weapon[0];
-    const meta = METADATA[slug];
+    const item = AVAX_ITEMS.find(i => i.weaponId === Number(weaponId));
+    const meta = item ? METADATA[item.id] : null;
 
     if (!meta) {
       return NextResponse.json({ error: 'Token not found' }, { status: 404 });

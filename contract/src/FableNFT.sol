@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "./IFableToken.sol";
-
 interface IERC721Receiver {
     function onERC721Received(address operator, address from, uint256 tokenId, bytes calldata data)
         external returns (bytes4);
@@ -11,37 +9,37 @@ interface IERC721Receiver {
 /**
  * FableNFT — ERC-721 weapon NFTs for Fable RPG.
  *
- * Weapons are sold for native AVAX, priced by rarity tier — this is the
- * Tavern Shop's primary sale, paid straight to treasury. FABLE (the
- * soulbound in-game currency) is never spent on an NFT; once minted, the
- * NFT is a normal, fully tradeable ERC-721 that resells for AVAX on
- * FableMarket. mintWeapon() (FABLE-burn) is kept as a separate forge/sink
- * path for crafted weapons and is independent of the AVAX shop price.
+ * Each weapon is its own catalog entry with its own individual AVAX price —
+ * no rarity tiers. Admin registers/prices catalog entries via
+ * registerWeapon/setWeaponPrice, so new weapons can be added later without
+ * a redeploy.
+ *
+ * mintWeaponWithAvax() is the Tavern Shop's only primary sale path — AVAX
+ * goes straight to treasury. The resulting NFT is a normal, fully tradeable
+ * ERC-721 that resells for AVAX on FableMarket.
  */
 contract FableNFT {
     string public constant name   = "Fable Weapons";
     string public constant symbol = "FWEAP";
 
-    IFableToken public fable;
     address public admin;
     address public treasury; // receives AVAX from mintWeaponWithAvax
     string public baseURI;   // e.g. https://playfable.xyz/api/nft-metadata/
 
     uint256 public nextTokenId = 1;
+    uint256 public nextWeaponId = 1;
 
-    enum Rarity { COMMON, RARE, EPIC, LEGENDARY }
-
-    struct Weapon {
+    struct WeaponType {
         string name;
-        Rarity rarity;
+        string weaponType; // "Sword", "Ability", etc — descriptive category, not a price tier
         uint256 damage;
         uint256 dps;
-        string weaponType;
+        uint256 avaxCost;  // wei — 0 means not sold for AVAX
+        bool active;
     }
 
-    mapping(Rarity => uint256) public mintCosts;     // FABLE burned on forge-mint (18 decimals)
-    mapping(Rarity => uint256) public mintCostsAvax; // AVAX price for Tavern Shop mint (wei)
-    mapping(uint256 => Weapon) public weapons;
+    mapping(uint256 => WeaponType) public catalog;  // weaponId => definition
+    mapping(uint256 => uint256) public weaponOf;     // tokenId => weaponId
 
     mapping(uint256 => address) private _owners;
     mapping(address => uint256) private _balances;
@@ -51,39 +49,42 @@ contract FableNFT {
     event Transfer(address indexed from, address indexed to, uint256 indexed tokenId);
     event Approval(address indexed owner, address indexed approved, uint256 indexed tokenId);
     event ApprovalForAll(address indexed owner, address indexed operator, bool approved);
-    event WeaponMinted(address indexed player, uint256 indexed tokenId, string name, Rarity rarity, uint256 fableBurned);
-    event WeaponPurchased(address indexed player, uint256 indexed tokenId, string name, Rarity rarity, uint256 avaxPaid);
-    event MintCostSet(Rarity indexed rarity, uint256 cost);
-    event MintCostAvaxSet(Rarity indexed rarity, uint256 cost);
+    event WeaponRegistered(uint256 indexed weaponId, string name, uint256 avaxCost);
+    event WeaponPriceSet(uint256 indexed weaponId, uint256 avaxCost);
+    event WeaponPurchased(address indexed player, uint256 indexed tokenId, uint256 indexed weaponId, uint256 avaxPaid);
     event TreasurySet(address indexed treasury);
 
     modifier onlyAdmin() { require(msg.sender == admin, "FableNFT: not admin"); _; }
 
-    constructor(address _fable, address _admin, address _treasury) {
-        fable = IFableToken(_fable);
+    constructor(address _admin, address _treasury) {
         admin = _admin;
         treasury = _treasury;
-
-        mintCosts[Rarity.COMMON]    = 50   * 10 ** 18;
-        mintCosts[Rarity.RARE]      = 150  * 10 ** 18;
-        mintCosts[Rarity.EPIC]      = 400  * 10 ** 18;
-        mintCosts[Rarity.LEGENDARY] = 1000 * 10 ** 18;
-
-        // Tavern Shop AVAX prices, ascending by rarity
-        mintCostsAvax[Rarity.COMMON]    = 0.05 ether;
-        mintCostsAvax[Rarity.RARE]      = 0.2  ether;
-        mintCostsAvax[Rarity.EPIC]      = 0.75 ether;
-        mintCostsAvax[Rarity.LEGENDARY] = 3    ether;
     }
 
-    function setMintCost(Rarity rarity, uint256 cost) external onlyAdmin {
-        mintCosts[rarity] = cost;
-        emit MintCostSet(rarity, cost);
+    // ── Admin: catalog management ────────────────────────────────────────────
+    function registerWeapon(
+        string calldata weaponName,
+        string calldata weaponType,
+        uint256 damage,
+        uint256 dps,
+        uint256 avaxCost
+    ) external onlyAdmin returns (uint256 weaponId) {
+        weaponId = nextWeaponId++;
+        catalog[weaponId] = WeaponType({
+            name: weaponName,
+            weaponType: weaponType,
+            damage: damage,
+            dps: dps,
+            avaxCost: avaxCost,
+            active: true
+        });
+        emit WeaponRegistered(weaponId, weaponName, avaxCost);
     }
 
-    function setMintCostAvax(Rarity rarity, uint256 cost) external onlyAdmin {
-        mintCostsAvax[rarity] = cost;
-        emit MintCostAvaxSet(rarity, cost);
+    function setWeaponPrice(uint256 weaponId, uint256 avaxCost) external onlyAdmin {
+        require(catalog[weaponId].active, "FableNFT: unknown weapon");
+        catalog[weaponId].avaxCost = avaxCost;
+        emit WeaponPriceSet(weaponId, avaxCost);
     }
 
     function setTreasury(address _treasury) external onlyAdmin {
@@ -114,62 +115,36 @@ contract FableNFT {
         return string(buffer);
     }
 
-    // Player pays FABLE (burned) → NFT minted to their wallet — forge/sink path
-    function mintWeapon(
-        string calldata weaponName,
-        Rarity rarity,
-        uint256 damage,
-        uint256 dps,
-        string calldata weaponType
-    ) external returns (uint256) {
-        uint256 cost = mintCosts[rarity];
-        fable.burnFrom(msg.sender, cost);
-
-        uint256 tokenId = _mintWeapon(msg.sender, weaponName, rarity, damage, dps, weaponType);
-        emit WeaponMinted(msg.sender, tokenId, weaponName, rarity, cost);
-        return tokenId;
-    }
-
     // Player pays AVAX → NFT minted to their wallet — Tavern Shop primary sale
-    function mintWeaponWithAvax(
-        string calldata weaponName,
-        Rarity rarity,
-        uint256 damage,
-        uint256 dps,
-        string calldata weaponType
-    ) external payable returns (uint256) {
-        uint256 cost = mintCostsAvax[rarity];
-        require(msg.value == cost, "FableNFT: wrong AVAX amount");
+    function mintWeaponWithAvax(uint256 weaponId) external payable returns (uint256) {
+        WeaponType memory wt = catalog[weaponId];
+        require(wt.active, "FableNFT: unknown weapon");
+        require(wt.avaxCost > 0, "FableNFT: not sold for AVAX");
+        require(msg.value == wt.avaxCost, "FableNFT: wrong AVAX amount");
 
-        uint256 tokenId = _mintWeapon(msg.sender, weaponName, rarity, damage, dps, weaponType);
+        uint256 tokenId = _mintWeapon(msg.sender, weaponId);
 
         (bool ok, ) = payable(treasury).call{ value: msg.value }("");
         require(ok, "FableNFT: treasury payment failed");
 
-        emit WeaponPurchased(msg.sender, tokenId, weaponName, rarity, cost);
+        emit WeaponPurchased(msg.sender, tokenId, weaponId, wt.avaxCost);
         return tokenId;
     }
 
-    function _mintWeapon(
-        address to,
-        string calldata weaponName,
-        Rarity rarity,
-        uint256 damage,
-        uint256 dps,
-        string calldata weaponType
-    ) internal returns (uint256) {
+    function _mintWeapon(address to, uint256 weaponId) internal returns (uint256) {
         uint256 tokenId = nextTokenId++;
         _mint(to, tokenId);
-
-        weapons[tokenId] = Weapon({
-            name: weaponName,
-            rarity: rarity,
-            damage: damage,
-            dps: dps,
-            weaponType: weaponType
-        });
-
+        weaponOf[tokenId] = weaponId;
         return tokenId;
+    }
+
+    // Convenience getter joining a minted token back to its catalog display info
+    function weapons(uint256 tokenId) external view returns (
+        string memory weaponName, string memory weaponType, uint256 damage, uint256 dps
+    ) {
+        require(_owners[tokenId] != address(0), "FableNFT: nonexistent token");
+        WeaponType memory wt = catalog[weaponOf[tokenId]];
+        return (wt.name, wt.weaponType, wt.damage, wt.dps);
     }
 
     // ── ERC-721 read ─────────────────────────────────────────────────────────

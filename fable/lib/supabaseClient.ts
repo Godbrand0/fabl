@@ -16,7 +16,6 @@ export interface PlayerData {
   class: string;
   level: number;
   xp: number;
-  gold: number;
   maxHp: number;
   hp: number;
   stats: {
@@ -28,12 +27,11 @@ export interface PlayerData {
   statPoints: number;
   maxUnlockedZone: number;
   equippedWeapon: string;
-  arsenal: string[];          // weapon IDs owned (includes free starter + G$ purchases)
-  abilities: string[];        // ability IDs owned via G$ purchase
+  arsenal: string[];          // weapon IDs owned (includes free starter + AVAX-bought NFTs)
+  abilities: string[];        // ability IDs owned via AVAX purchase
   inventory: Array<{ item: string; count: number }>;
   nftItems: NftItem[];        // on-chain NFT records
-  ubiBuffActive: boolean;
-  ubiBuffExpiresAt: number | null;
+  tempBuff?: 'damage' | 'defense' | null; // active FableShop buff, cleared on zone transition
   activeAbility: string | null;
   pendingRewards: string[];
   onboarded: boolean;          // has the player completed the Guildmaster tutorial?
@@ -41,7 +39,6 @@ export interface PlayerData {
   currentZone: string | null;  // which zone scene "Continue" should resume into
   lastProgressSync?: {        // last "Commit Progress" on-chain sync
     level: number;
-    gold: number;
     txHash: string;
     syncedAt: string;
   };
@@ -62,7 +59,6 @@ function withDefaults(p: any): PlayerData {
     class:            p.hero_class       ?? p.class        ?? 'knight',
     level:            p.level            ?? 1,
     xp:               p.xp               ?? 0,
-    gold:             p.gold             ?? 100,
     maxHp:            p.maxHp            ?? p.maxhp        ?? 100,
     hp:               p.hp               ?? 100,
     stats:            p.stats            ?? { strength: 0, agility: 0, defense: 0, vitality: 0 },
@@ -73,8 +69,7 @@ function withDefaults(p: any): PlayerData {
     abilities:        p.abilities        ?? [],
     inventory:        p.inventory        ?? [],
     nftItems:         p.nftItems         ?? p.nftitems     ?? [],
-    ubiBuffActive:    p.ubiBuffActive     ?? p.ubibuffactive    ?? false,
-    ubiBuffExpiresAt: p.ubiBuffExpiresAt  ?? p.ubibuffexpiresat ?? null,
+    tempBuff:         p.tempBuff          ?? p.tempbuff        ?? null,
     activeAbility:    p.activeAbility     ?? p.activeability    ?? null,
     pendingRewards:   p.pendingRewards    ?? p.pendingrewards   ?? [],
     onboarded:        p.onboarded         ?? false,
@@ -92,7 +87,6 @@ function toDbRow(player: PlayerData) {
     hero_class:       player.class,
     level:            player.level,
     xp:               player.xp,
-    gold:             player.gold,
     maxhp:            player.maxHp,
     hp:               player.hp,
     stats:            player.stats,
@@ -103,8 +97,7 @@ function toDbRow(player: PlayerData) {
     abilities:        player.abilities,
     inventory:        player.inventory,
     nftitems:         player.nftItems,
-    ubibuffactive:    player.ubiBuffActive,
-    ubibuffexpiresat: player.ubiBuffExpiresAt,
+    tempbuff:         player.tempBuff ?? null,
     activeability:    player.activeAbility ?? null,
     pendingrewards:   player.pendingRewards ?? [],
     onboarded:        player.onboarded ?? false,
@@ -165,25 +158,25 @@ export const dbService = {
     await this.savePlayer(updated);
   },
 
-  // Log a G$ level reward claim to the audit table
-  async recordLevelRewardClaim(walletAddress: string, levelId: number, zone: string, amountGd: number, txHash: string): Promise<void> {
+  // Log a FABLE level reward claim to the audit table
+  async recordLevelRewardClaim(walletAddress: string, levelId: number, zone: string, amountFable: number, txHash: string): Promise<void> {
     if (!supabase) return;
     await supabase.from('level_reward_claims').upsert({
       wallet_address: walletAddress.toLowerCase(),
       level_id: levelId,
       zone,
-      amount_gd: amountGd,
+      amount_gd: amountFable,
       tx_hash: txHash,
     }, { onConflict: 'wallet_address,level_id' });
   },
 
   // Save an on-chain progress sync record
-  async recordProgressSync(walletAddress: string, level: number, gold: number, txHash: string): Promise<void> {
+  async recordProgressSync(walletAddress: string, level: number, txHash: string): Promise<void> {
     const player = await this.getPlayer(walletAddress.toLowerCase());
     if (!player) return;
     const updated = {
       ...player,
-      lastProgressSync: { level, gold, txHash, syncedAt: new Date().toISOString() },
+      lastProgressSync: { level, txHash, syncedAt: new Date().toISOString() },
     };
     await this.savePlayer(updated);
   },
