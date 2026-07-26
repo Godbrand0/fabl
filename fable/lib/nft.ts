@@ -47,19 +47,21 @@ export const FABLE_TOKEN_ABI = parseAbi([
 ]);
 
 // FableGameSession — one player-signed tx to enter a zone (burns the flat
-// entry fee), one to claim its reward on clear (the claim carries a
-// game-server attestation).
+// entry fee, once ever — free on replays), one to submit the run's score on
+// clear (repeatable; the zone's fixed FABLE reward only mints the first time).
 export const FABLE_GAME_SESSION_ADDRESS = (
   process.env.NEXT_PUBLIC_FABLE_GAME_SESSION_ADDRESS || ''
 ) as `0x${string}`;
 
 export const FABLE_GAME_SESSION_ABI = parseAbi([
+  'function entered(address player, uint256 zoneId) view returns (bool)',
   'function claimed(address player, uint256 zoneId) view returns (bool)',
   'function zoneCosts(uint256 zoneId) view returns (uint256)',
+  'function zoneRewards(uint256 zoneId) view returns (uint256)',
   'function enterZone(uint256 zoneId)',
-  'function clearZone(uint256 zoneId, uint256 amount, uint256 deadline, bytes signature)',
+  'function clearZone(uint256 zoneId, uint256 score, uint256 deadline, bytes signature)',
   'event ZoneEntered(address indexed player, uint256 indexed zoneId)',
-  'event ZoneCleared(address indexed player, uint256 indexed zoneId, uint256 fableEarned)',
+  'event ZoneCleared(address indexed player, uint256 indexed zoneId, uint256 score, uint256 fableEarned)',
 ]);
 
 // FableShop — spend FABLE on consumables, buffs, and stat points. Purely

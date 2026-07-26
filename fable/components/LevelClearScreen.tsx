@@ -24,6 +24,7 @@ const POTIONS = FABLE_ITEMS.filter(i => i.heal || i.fullHeal);
 
 interface Props {
   clearedZone: string;
+  runScore: number;
   playerData: any;
   setPlayerData: React.Dispatch<React.SetStateAction<any>>;
   walletAddress?: string;
@@ -35,22 +36,21 @@ interface Props {
 }
 
 export default function LevelClearScreen({
-  clearedZone, playerData, setPlayerData,
+  clearedZone, runScore, playerData, setPlayerData,
   walletAddress, walletConnected, connectWallet, fableBalance, refreshBalance,
   onContinue,
 }: Props) {
   const [selected, setSelected]     = useState<string | null>(null);
   const [justBought, setJustBought] = useState<string | null>(null);
   const [buyingPotion, setBuyingPotion] = useState(false);
-  const [claiming, setClaiming]     = useState(false);
-  const [claimed, setClaimed]       = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitted, setSubmitted]   = useState(false);
   const [entering, setEntering]     = useState(false);
 
   const nextScene    = ZONE_PROGRESSION[clearedZone];
   const nextZoneName = nextScene ? ZONE_NAMES[nextScene] : '';
   const isFinalZone  = clearedZone === 'ObsidianPeakScene';
   const zoneReward   = ZONE_LEVEL_REWARDS[clearedZone] ?? 0;
-  const alreadyPending = (playerData.pendingRewards || []).includes(clearedZone);
 
   const selectedPotion = POTIONS.find(p => p.id === selected) ?? null;
   const canAfford = selectedPotion ? parseFloat(fableBalance) >= selectedPotion.fableCost : false;
@@ -86,11 +86,14 @@ export default function LevelClearScreen({
     }
   };
 
-  // Player-signed: claim this zone's FABLE reward using a game-server attestation.
-  // Falls back to `pendingRewards` (claimable later from the Bank) if the tx fails or is skipped.
-  const claimReward = async () => {
-    if (claiming || claimed || !zoneReward) return;
-    setClaiming(true);
+  // Player-signed: submit this run's score using a game-server attestation.
+  // Repeatable every clear — the zone's fixed FABLE reward only mints the
+  // first time this player clears this zone (enforced on-chain, not here).
+  // Falls back to `pendingRewards` (claimable later from the Bank) if the
+  // tx fails or is skipped — that fallback only ever covers the FABLE side.
+  const submitScore = async () => {
+    if (submitting || submitted) return;
+    setSubmitting(true);
     try {
       let addr = walletAddress;
       if (!walletConnected || !addr) {
@@ -102,29 +105,29 @@ export default function LevelClearScreen({
       const res = await fetch('/api/attest-zone-clear', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ walletAddress: addr, zone: clearedZone }),
+        body: JSON.stringify({ walletAddress: addr, zone: clearedZone, score: runScore }),
       });
       const attestation = await res.json();
       if (!res.ok) throw new Error(attestation.error || 'Attestation failed');
 
       const zoneId = ZONE_LEVEL_IDS[clearedZone];
       const success = await avalancheService.clearZone(
-        addr, zoneId, BigInt(attestation.amount), attestation.deadline, attestation.signature,
+        addr, zoneId, attestation.score, attestation.deadline, attestation.signature,
       );
-      if (!success) throw new Error('Claim tx failed');
+      if (!success) throw new Error('Submit tx failed');
 
-      setClaimed(true);
+      setSubmitted(true);
       await refreshBalance();
     } catch (err) {
-      console.error('claimReward failed, deferring to Bank:', err);
-      // Fall back to the deferred claim path so the reward isn't lost.
+      console.error('submitScore failed, deferring FABLE claim to Bank:', err);
+      // Fall back to the deferred claim path so a first-clear reward isn't lost.
       setPlayerData((prev: any) => {
         const pending = [...(prev.pendingRewards || [])];
         if (!pending.includes(clearedZone)) pending.push(clearedZone);
         return { ...prev, pendingRewards: pending };
       });
     } finally {
-      setClaiming(false);
+      setSubmitting(false);
     }
   };
 
@@ -167,27 +170,27 @@ export default function LevelClearScreen({
           <p className="text-zinc-400 text-xs">{ZONE_NAMES[clearedZone] ?? clearedZone} conquered</p>
         </div>
 
-        {/* FABLE Reward Banner */}
-        {zoneReward > 0 && (
-          <div className="rounded-xl border-2 px-4 py-3 flex items-center gap-3 transition-all border-emerald-500 bg-emerald-950/40">
-            <span className="text-2xl shrink-0">◈</span>
-            <div className="flex-1 min-w-0">
-              <p className="text-[12px] font-extrabold text-emerald-400">+{zoneReward.toLocaleString()} FABLE earned!</p>
-              <p className="text-[10px] text-zinc-400">
-                {claimed ? 'Claimed to your wallet.' : alreadyPending ? 'Already pending — claim it from the Bank.' : 'Sign to claim it now, or skip and claim later from the Bank.'}
-              </p>
-            </div>
-            {!claimed && !alreadyPending && (
-              <button
-                onClick={claimReward}
-                disabled={claiming}
-                className="shrink-0 flex items-center gap-1.5 bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 text-white text-[10px] font-bold px-3 py-2 rounded-lg active:scale-95 transition-all"
-              >
-                {claiming ? <Loader2 size={12} className="animate-spin" /> : 'Claim'}
-              </button>
-            )}
+        {/* Score / FABLE Reward Banner */}
+        <div className="rounded-xl border-2 px-4 py-3 flex items-center gap-3 transition-all border-emerald-500 bg-emerald-950/40">
+          <span className="text-2xl shrink-0">🏆</span>
+          <div className="flex-1 min-w-0">
+            <p className="text-[12px] font-extrabold text-emerald-400">{runScore.toLocaleString()} points earned!</p>
+            <p className="text-[10px] text-zinc-400">
+              {submitted
+                ? `Submitted to the leaderboard${zoneReward > 0 ? ' — FABLE claimed if this was your first clear.' : '.'}`
+                : `Sign to post your score${zoneReward > 0 ? ` (+${zoneReward.toLocaleString()} FABLE on your first clear)` : ''}, or skip and claim any FABLE later from the Bank.`}
+            </p>
           </div>
-        )}
+          {!submitted && (
+            <button
+              onClick={submitScore}
+              disabled={submitting}
+              className="shrink-0 flex items-center gap-1.5 bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 text-white text-[10px] font-bold px-3 py-2 rounded-lg active:scale-95 transition-all"
+            >
+              {submitting ? <Loader2 size={12} className="animate-spin" /> : 'Submit'}
+            </button>
+          )}
+        </div>
 
         {/* HP status */}
         <div className="bg-zinc-900 border border-zinc-700 rounded-lg p-3 flex flex-col gap-2">
@@ -267,7 +270,7 @@ export default function LevelClearScreen({
           }
         </button>
         {!isFinalZone && !entering && (
-          <p className="text-center text-[9px] text-zinc-600 -mt-2">Entry costs {ZONE_ENTRY_FEE} FABLE</p>
+          <p className="text-center text-[9px] text-zinc-600 -mt-2">First entry costs {ZONE_ENTRY_FEE} FABLE — free every time after</p>
         )}
       </div>
     </div>

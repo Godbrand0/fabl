@@ -72,11 +72,20 @@ contract DeployFable is Script {
         token.setGameContract(deployer, true);
         leaderboard.setGameContract(address(session));
 
-        // Flat 50 FABLE entry fee, every zone.
+        // Flat 50 FABLE one-off entry fee, every zone — charged once per
+        // player per zone, free on every replay after.
         session.setZoneCost(ZONE_EMBER_FIELDS, ZONE_ENTRY_FEE);
         session.setZoneCost(ZONE_ASHWATER_MARSH, ZONE_ENTRY_FEE);
         session.setZoneCost(ZONE_OBSIDIAN_PEAK, ZONE_ENTRY_FEE);
         session.setZoneCost(ZONE_SUNFALL_DUNES, ZONE_ENTRY_FEE);
+
+        // Fixed FABLE reward per zone, minted once per player on first clear —
+        // kept in sync with lib/nft.ts's ZONE_LEVEL_REWARDS (300/500/700/900
+        // in play order: Sunfall, Ember, Ashwater, Obsidian).
+        session.setZoneReward(ZONE_SUNFALL_DUNES, 300 ether);
+        session.setZoneReward(ZONE_EMBER_FIELDS, 500 ether);
+        session.setZoneReward(ZONE_ASHWATER_MARSH, 700 ether);
+        session.setZoneReward(ZONE_OBSIDIAN_PEAK, 900 ether);
 
         // Tavern weapon catalog — 6 individually priced NFTs, no rarity tiers.
         // weaponId order matches lib/nft.ts's TAVERN_WEAPONS list exactly.

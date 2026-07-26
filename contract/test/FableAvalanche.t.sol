@@ -43,6 +43,8 @@ contract FableAvalancheTest is Test {
 
         shop.setItemPrice(1, 25 ether); // minor potion
         shop.setStatPointPrices(15 ether, 30 ether);
+
+        session.setZoneReward(1, 500 ether); // fixed FABLE reward, zone 1
         vm.stopPrank();
     }
 
@@ -62,30 +64,30 @@ contract FableAvalancheTest is Test {
         token.mintReward(player1, 1 ether);
     }
 
-    // ── FableGameSession: enter + server-attested claim ─────────────────────
-    function _signClear(address player, uint256 zoneId, uint256 amount, uint256 deadline)
+    // ── FableGameSession: enter + server-attested score ──────────────────────
+    function _signClear(address player, uint256 zoneId, uint256 score, uint256 deadline)
         internal view returns (bytes memory)
     {
         bytes32 hash = keccak256(
-            abi.encodePacked(address(session), block.chainid, player, zoneId, amount, deadline)
+            abi.encodePacked(address(session), block.chainid, player, zoneId, score, deadline)
         );
         bytes32 ethSignedHash = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", hash));
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(gameServerKey, ethSignedHash);
         return abi.encodePacked(r, s, v);
     }
 
-    function test_FullZoneClearMintsFableAndSubmitsScore() public {
+    function test_FullZoneClearMintsFixedRewardAndSubmitsScore() public {
         vm.prank(player1);
         session.enterZone(1); // free zone
 
         uint256 deadline = block.timestamp + 1 hours;
-        bytes memory sig = _signClear(player1, 1, 45 ether, deadline);
+        bytes memory sig = _signClear(player1, 1, 130, deadline); // 130 = sum of enemy points killed
 
         vm.prank(player1);
-        session.clearZone(1, 45 ether, deadline, sig);
+        session.clearZone(1, 130, deadline, sig);
 
-        assertEq(token.balanceOf(player1), 45 ether);
-        assertEq(leaderboard.playerBestScore(leaderboard.currentWeek(), player1), 45 ether);
+        assertEq(token.balanceOf(player1), 500 ether); // fixed zone reward, not the score
+        assertEq(leaderboard.playerBestScore(leaderboard.currentWeek(), player1), 130);
     }
 
     function test_ClearZoneRejectsBadSignature() public {
@@ -95,32 +97,36 @@ contract FableAvalancheTest is Test {
 
         vm.prank(player1);
         vm.expectRevert("FableGameSession: bad attestation");
-        session.clearZone(1, 45 ether, deadline, sig);
+        session.clearZone(1, 130, deadline, sig);
     }
 
     function test_ClearZoneRejectsExpiredAttestation() public {
         uint256 deadline = block.timestamp + 1 hours;
-        bytes memory sig = _signClear(player1, 1, 45 ether, deadline);
+        bytes memory sig = _signClear(player1, 1, 130, deadline);
 
         vm.warp(deadline + 1);
         vm.prank(player1);
         vm.expectRevert("FableGameSession: attestation expired");
-        session.clearZone(1, 45 ether, deadline, sig);
+        session.clearZone(1, 130, deadline, sig);
     }
 
-    function test_ClearZoneRejectsDoubleClaim() public {
+    function test_ClearZoneIsRepeatableButRewardMintsOnce() public {
         uint256 deadline = block.timestamp + 1 hours;
-        bytes memory sig = _signClear(player1, 1, 45 ether, deadline);
 
         vm.prank(player1);
-        session.clearZone(1, 45 ether, deadline, sig);
+        session.clearZone(1, 130, deadline, _signClear(player1, 1, 130, deadline));
+        assertEq(token.balanceOf(player1), 500 ether);
 
+        // Replay the zone for a better score — no server involvement needed
+        // to re-verify anything on-chain beyond the signature itself.
         vm.prank(player1);
-        vm.expectRevert("FableGameSession: already claimed");
-        session.clearZone(1, 45 ether, deadline, sig);
+        session.clearZone(1, 210, deadline, _signClear(player1, 1, 210, deadline));
+
+        assertEq(token.balanceOf(player1), 500 ether); // reward did NOT mint a second time
+        assertEq(leaderboard.playerBestScore(leaderboard.currentWeek(), player1), 210); // best score updated
     }
 
-    function test_EliteZoneEntryBurnsFable() public {
+    function test_EnterZoneChargesFeeOnceThenFreeOnReplay() public {
         vm.prank(admin);
         session.setZoneCost(2, 10 ether);
 
@@ -129,7 +135,10 @@ contract FableAvalancheTest is Test {
 
         vm.prank(player1);
         session.enterZone(2);
+        assertEq(token.balanceOf(player1), 0); // one-off fee charged
 
+        vm.prank(player1);
+        session.enterZone(2); // replay — no balance to burn, must not revert
         assertEq(token.balanceOf(player1), 0);
     }
 

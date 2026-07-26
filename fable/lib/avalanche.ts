@@ -266,18 +266,20 @@ export const avalancheService = {
     }
   },
 
-  // Player-signed: claim a zone's FABLE reward using the game server's attestation.
+  // Player-signed: submit this run's score using the game server's
+  // attestation. Repeatable — the zone's fixed FABLE reward only mints the
+  // first time a player clears it, but score submission works every run.
   async clearZone(
     walletAddress: string,
     zoneId: number,
-    amountFableWei: bigint,
+    score: number,
     deadline: number,
     signature: `0x${string}`,
   ): Promise<boolean> {
     if (!FABLE_GAME_SESSION_ADDRESS) return false;
 
     if (!this.getWalletClient()) {
-      return false; // mock wallet in dev — nothing on-chain to claim from
+      return false; // mock wallet in dev — nothing on-chain to submit to
     }
 
     try {
@@ -290,7 +292,7 @@ export const avalancheService = {
         address: FABLE_GAME_SESSION_ADDRESS,
         abi: FABLE_GAME_SESSION_ABI,
         functionName: 'clearZone',
-        args: [BigInt(zoneId), amountFableWei, BigInt(deadline), signature],
+        args: [BigInt(zoneId), BigInt(score), BigInt(deadline), signature],
       });
       const hash = await walletClient.writeContract(request);
       const receipt = await publicClient.waitForTransactionReceipt({ hash });

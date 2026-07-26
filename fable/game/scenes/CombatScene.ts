@@ -79,6 +79,10 @@ export default abstract class CombatScene extends Phaser.Scene {
   protected levelCleared = false;
   private zoneProgressSeeded = false;
 
+  // Leaderboard score — sum of every enemy's point value killed this run
+  // (imps + boss). Resets each time the scene (re)starts, so replays score fresh.
+  protected runScore = 0;
+
   // Death guard — prevents physics overlaps from calling playerDied multiple times
   private playerDead = false;
 
@@ -96,6 +100,7 @@ export default abstract class CombatScene extends Phaser.Scene {
     this.enemiesDefeated = 0;
     this.levelCleared = false;
     this.playerDead = false;
+    this.runScore = 0;
   }
 
   create() {
@@ -625,6 +630,7 @@ export default abstract class CombatScene extends Phaser.Scene {
   private defeatEnemy(enemy: any) {
     const isBoss = enemy.isBoss;
     const points = enemy.getData('points') || 10;
+    this.runScore += points;
 
     if (isBoss || Math.random() < 0.25) {
       const lootKey = enemy.texture.key === 'poison_slime' ? 'scorpion' : 'fire_item';
@@ -648,7 +654,7 @@ export default abstract class CombatScene extends Phaser.Scene {
       this.player.setVelocity(0);
       audioManager.playSfx('zoneClear');
       audioManager.stopMusic();
-      gameBridge.emit('zone_cleared', { zone: this.scene.key, score: points * 10 });
+      gameBridge.emit('zone_cleared', { zone: this.scene.key, score: this.runScore });
 
       // Victory flash
       this.cameras.main.flash(800, 255, 220, 0);

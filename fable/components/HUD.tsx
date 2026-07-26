@@ -37,6 +37,7 @@ export default function HUD({
   const [cooldownRemaining, setCooldownRemaining] = useState(0); // seconds
   const [inLevelClear, setInLevelClear] = useState(false);
   const [levelClearZone, setLevelClearZone] = useState<string>('');
+  const [levelClearScore, setLevelClearScore] = useState(0);
   const [message, setMessage] = useState<string | null>(null);
 
 
@@ -131,6 +132,7 @@ export default function HUD({
         return updated;
       });
       setLevelClearZone(data.zone);
+      setLevelClearScore(data.score ?? 0);
       setInLevelClear(true);
     });
 
@@ -311,6 +313,7 @@ export default function HUD({
       {inLevelClear && (
         <LevelClearScreen
           clearedZone={levelClearZone}
+          runScore={levelClearScore}
           playerData={playerData}
           setPlayerData={setPlayerData}
           walletAddress={walletAddress || playerData?.wallet_address || undefined}

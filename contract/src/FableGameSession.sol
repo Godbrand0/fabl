@@ -9,30 +9,37 @@ interface IFableLeaderboard {
 
 /**
  * FableGameSession — two player-signed transactions per level: one to
- * enter a zone, one to claim its reward on clear. Kill counts, loot, and
- * run progress stay in the game's off-chain database; the only on-chain
- * state is "did this player already claim this zone's reward."
+ * enter a zone, one to submit its score on clear.
  *
- * enterZone is signed by the player directly — no server involvement.
+ * enterZone is signed by the player directly — no server involvement. The
+ * FABLE entry fee is a one-off unlock: it's charged the first time a
+ * player ever enters a given zone, and free every time after (including
+ * retries after dying, and replays after clearing).
  *
  * clearZone is also signed by the player, but only succeeds if it carries
  * a valid signature from the trusted `gameServer` key attesting
- * (player, zoneId, amount, deadline). The game server issues that
- * signature once its own zone-clear check (Supabase-backed) passes,
- * without ever holding a session on-chain or paying the gas itself.
+ * (player, zoneId, score, deadline) — the run's score is the sum of every
+ * enemy's point value killed that run, tallied client-side and countersigned
+ * by the game server once its own zone-clear check passes. Score submission
+ * is repeatable (every clear, first or replay, posts to the leaderboard);
+ * the zone's FABLE reward is fixed on-chain and only ever minted once.
  */
 contract FableGameSession {
     IFableToken       public fable;
     IFableLeaderboard public leaderboard;
     address public admin;
-    address public gameServer; // signs zone-clear attestations off-chain
+    address public gameServer; // signs zone-clear score attestations off-chain
 
-    mapping(uint256 => uint256) public zoneCosts; // zoneId => FABLE entry cost
-    mapping(address => mapping(uint256 => bool)) public claimed; // player => zoneId => claimed
+    mapping(uint256 => uint256) public zoneCosts;   // zoneId => one-off FABLE entry fee
+    mapping(uint256 => uint256) public zoneRewards; // zoneId => fixed FABLE reward, minted once per player
+
+    mapping(address => mapping(uint256 => bool)) public entered; // player => zoneId => entry fee already paid
+    mapping(address => mapping(uint256 => bool)) public claimed; // player => zoneId => reward already minted
 
     event ZoneEntered(address indexed player, uint256 indexed zoneId);
-    event ZoneCleared(address indexed player, uint256 indexed zoneId, uint256 fableEarned);
+    event ZoneCleared(address indexed player, uint256 indexed zoneId, uint256 score, uint256 fableEarned);
     event ZoneCostSet(uint256 indexed zoneId, uint256 cost);
+    event ZoneRewardSet(uint256 indexed zoneId, uint256 reward);
     event GameServerSet(address indexed gameServer);
 
     modifier onlyAdmin() { require(msg.sender == admin, "FableGameSession: not admin"); _; }
@@ -42,7 +49,7 @@ contract FableGameSession {
         leaderboard = IFableLeaderboard(_leaderboard);
         gameServer = _gameServer;
         admin = _admin;
-        // Actual per-zone costs are set post-deploy via setZoneCost (see DeployFable.s.sol)
+        // Actual per-zone costs/rewards are set post-deploy via setZoneCost/setZoneReward (see DeployFable.s.sol)
     }
 
     // ── Admin ─────────────────────────────────────────────────────────────────
@@ -51,36 +58,47 @@ contract FableGameSession {
         emit ZoneCostSet(zoneId, cost);
     }
 
+    function setZoneReward(uint256 zoneId, uint256 reward) external onlyAdmin {
+        zoneRewards[zoneId] = reward;
+        emit ZoneRewardSet(zoneId, reward);
+    }
+
     function setGameServer(address _gameServer) external onlyAdmin {
         gameServer = _gameServer;
         emit GameServerSet(_gameServer);
     }
 
-    // ── USER SIGNS: start a run, burning the zone entry fee if any ─────────────
+    // ── USER SIGNS: start a run. One-off FABLE fee the first time only ──────────
     function enterZone(uint256 zoneId) external {
-        uint256 cost = zoneCosts[zoneId];
-        if (cost > 0) {
-            fable.burnFrom(msg.sender, cost);
+        if (!entered[msg.sender][zoneId]) {
+            entered[msg.sender][zoneId] = true;
+            uint256 cost = zoneCosts[zoneId];
+            if (cost > 0) fable.burnFrom(msg.sender, cost);
         }
         emit ZoneEntered(msg.sender, zoneId);
     }
 
-    // ── USER SIGNS: claim a zone's reward using the server's attestation ───────
-    function clearZone(uint256 zoneId, uint256 amount, uint256 deadline, bytes calldata signature) external {
+    // ── USER SIGNS: submit this run's score using the server's attestation.
+    // Repeatable — every clear posts a score. The zone's fixed FABLE reward
+    // only mints the first time this player clears it.
+    function clearZone(uint256 zoneId, uint256 score, uint256 deadline, bytes calldata signature) external {
         require(block.timestamp <= deadline, "FableGameSession: attestation expired");
-        require(!claimed[msg.sender][zoneId], "FableGameSession: already claimed");
 
         bytes32 hash = keccak256(
-            abi.encodePacked(address(this), block.chainid, msg.sender, zoneId, amount, deadline)
+            abi.encodePacked(address(this), block.chainid, msg.sender, zoneId, score, deadline)
         );
         require(_recoverSigner(hash, signature) == gameServer, "FableGameSession: bad attestation");
 
-        claimed[msg.sender][zoneId] = true;
+        uint256 fableEarned;
+        if (!claimed[msg.sender][zoneId]) {
+            claimed[msg.sender][zoneId] = true;
+            fableEarned = zoneRewards[zoneId];
+            if (fableEarned > 0) fable.mintReward(msg.sender, fableEarned);
+        }
 
-        if (amount > 0) fable.mintReward(msg.sender, amount);
-        leaderboard.submitScore(msg.sender, amount, zoneId);
+        leaderboard.submitScore(msg.sender, score, zoneId);
 
-        emit ZoneCleared(msg.sender, zoneId, amount);
+        emit ZoneCleared(msg.sender, zoneId, score, fableEarned);
     }
 
     // ── EIP-191 personal_sign recovery (no external deps) ───────────────────────
