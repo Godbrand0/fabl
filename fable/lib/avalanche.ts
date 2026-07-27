@@ -302,4 +302,70 @@ export const avalancheService = {
       return false;
     }
   },
+
+  // Player-signed: died and quit. Banks the run's score with no FABLE reward.
+  async submitCheckpoint(
+    walletAddress: string,
+    zoneId: number,
+    score: number,
+    deadline: number,
+    signature: `0x${string}`,
+  ): Promise<boolean> {
+    if (!FABLE_GAME_SESSION_ADDRESS) return false;
+    if (!this.getWalletClient()) return false;
+
+    try {
+      await this.ensureAvalancheNetwork();
+      const walletClient = this.getWalletClient(walletAddress as `0x${string}`);
+      if (!walletClient) return false;
+
+      const { request } = await publicClient.simulateContract({
+        account: walletAddress as `0x${string}`,
+        address: FABLE_GAME_SESSION_ADDRESS,
+        abi: FABLE_GAME_SESSION_ABI,
+        functionName: 'submitCheckpoint',
+        args: [BigInt(zoneId), BigInt(score), BigInt(deadline), signature],
+      });
+      const hash = await walletClient.writeContract(request);
+      const receipt = await publicClient.waitForTransactionReceipt({ hash });
+      return receipt.status === 'success';
+    } catch (err) {
+      console.error('submitCheckpoint failed:', err);
+      return false;
+    }
+  },
+
+  // Player-signed: died and paid to keep fighting. Burns the flat continue
+  // fee and banks the score so far; caller is responsible for resuming
+  // gameplay with kill count intact once this succeeds.
+  async continueRun(
+    walletAddress: string,
+    zoneId: number,
+    score: number,
+    deadline: number,
+    signature: `0x${string}`,
+  ): Promise<boolean> {
+    if (!FABLE_GAME_SESSION_ADDRESS) return false;
+    if (!this.getWalletClient()) return false;
+
+    try {
+      await this.ensureAvalancheNetwork();
+      const walletClient = this.getWalletClient(walletAddress as `0x${string}`);
+      if (!walletClient) return false;
+
+      const { request } = await publicClient.simulateContract({
+        account: walletAddress as `0x${string}`,
+        address: FABLE_GAME_SESSION_ADDRESS,
+        abi: FABLE_GAME_SESSION_ABI,
+        functionName: 'continueRun',
+        args: [BigInt(zoneId), BigInt(score), BigInt(deadline), signature],
+      });
+      const hash = await walletClient.writeContract(request);
+      const receipt = await publicClient.waitForTransactionReceipt({ hash });
+      return receipt.status === 'success';
+    } catch (err) {
+      console.error('continueRun failed:', err);
+      return false;
+    }
+  },
 };

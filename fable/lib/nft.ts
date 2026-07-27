@@ -46,9 +46,11 @@ export const FABLE_TOKEN_ABI = parseAbi([
   'function mintReward(address player, uint256 amount)',
 ]);
 
-// FableGameSession — one player-signed tx to enter a zone (burns the flat
-// entry fee, once ever — free on replays), one to submit the run's score on
-// clear (repeatable; the zone's fixed FABLE reward only mints the first time).
+// FableGameSession — covers a zone run's full lifecycle: enter (one-off
+// FABLE fee, free on replays), clear (boss killed — repeatable score,
+// one-time fixed FABLE reward), and death (either submitCheckpoint to
+// quit with the score banked, or continueRun to pay the flat continue
+// fee and resume with kill count intact).
 export const FABLE_GAME_SESSION_ADDRESS = (
   process.env.NEXT_PUBLIC_FABLE_GAME_SESSION_ADDRESS || ''
 ) as `0x${string}`;
@@ -58,11 +60,22 @@ export const FABLE_GAME_SESSION_ABI = parseAbi([
   'function claimed(address player, uint256 zoneId) view returns (bool)',
   'function zoneCosts(uint256 zoneId) view returns (uint256)',
   'function zoneRewards(uint256 zoneId) view returns (uint256)',
+  'function continueFee() view returns (uint256)',
   'function enterZone(uint256 zoneId)',
   'function clearZone(uint256 zoneId, uint256 score, uint256 deadline, bytes signature)',
+  'function submitCheckpoint(uint256 zoneId, uint256 score, uint256 deadline, bytes signature)',
+  'function continueRun(uint256 zoneId, uint256 score, uint256 deadline, bytes signature)',
   'event ZoneEntered(address indexed player, uint256 indexed zoneId)',
   'event ZoneCleared(address indexed player, uint256 indexed zoneId, uint256 score, uint256 fableEarned)',
+  'event CheckpointSubmitted(address indexed player, uint256 indexed zoneId, uint256 score)',
+  'event RunContinued(address indexed player, uint256 indexed zoneId, uint256 score, uint256 fablePaid)',
 ]);
+
+// Attestation "action" tags — baked into the signed hash so a signature
+// issued for one of clearZone/submitCheckpoint/continueRun can never be
+// replayed into another. Must match FableGameSession's ACTION_* constants.
+export const ATTEST_ACTION = { CLEAR: 1, CHECKPOINT: 2, CONTINUE: 3 } as const;
+export type AttestAction = typeof ATTEST_ACTION[keyof typeof ATTEST_ACTION];
 
 // FableShop — spend FABLE on consumables, buffs, and stat points. Purely
 // player-signed burns against a fixed on-chain price; no server involved.
@@ -100,6 +113,10 @@ export const ZONE_LEVEL_REWARDS: Record<string, number> = {
 
 // Flat FABLE entry fee, every zone — must match FableGameSession.zoneCosts
 export const ZONE_ENTRY_FEE = 50;
+
+// Flat FABLE cost to resume after dying mid-run — must match
+// FableGameSession.continueFee
+export const CONTINUE_FEE = 30;
 
 export interface NftItem {
   itemId: string;   // e.g. 'ember_blade'

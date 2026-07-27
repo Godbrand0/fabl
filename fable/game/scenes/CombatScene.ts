@@ -129,11 +129,13 @@ export default abstract class CombatScene extends Phaser.Scene {
         const textureKey = WEAPON_TEXTURE[data.equippedWeapon ?? 'bamboo_stick'] ?? 'player_bamboo';
         if (this.player?.active) this.player.setTexture(textureKey);
 
-        // Seed mid-zone kill progress once, from the player's last save
+        // Seed mid-zone kill/score progress once, from the player's last save
         if (!this.zoneProgressSeeded) {
           this.zoneProgressSeeded = true;
-          const seeded = data.zoneProgress?.[this.scene.key]?.enemiesDefeated;
-          if (typeof seeded === 'number') this.enemiesDefeated = seeded;
+          const seededKills = data.zoneProgress?.[this.scene.key]?.enemiesDefeated;
+          const seededScore = data.zoneProgress?.[this.scene.key]?.runScore;
+          if (typeof seededKills === 'number') this.enemiesDefeated = seededKills;
+          if (typeof seededScore === 'number') this.runScore = seededScore;
         }
       }
     });
@@ -203,12 +205,12 @@ export default abstract class CombatScene extends Phaser.Scene {
     // Pause menu: freeze/resume the running scene without destroying it
     const unsubPause = gameBridge.on('game_pause', () => { this.scene.pause(); });
     const unsubResume = gameBridge.on('game_resume', () => { this.scene.resume(); });
-    // On player death: fully restart this zone fresh (fresh enemies, HP already
-    // restored by React before this fires)
-    const unsubRestart = gameBridge.on('restart_zone', () => { this.scene.restart(); });
+    // On a paid continue after death: revive in place, kill count and score
+    // intact — no scene restart, no enemies un-killed.
+    const unsubContinue = gameBridge.on('continue_run', () => { this.reviveInPlace(); });
     this.events.on('destroy', () => {
       unsubL(); unsubR(); unsubA(); unsubSI(); unsubNext(); unsubW();
-      unsubPause(); unsubResume(); unsubRestart();
+      unsubPause(); unsubResume(); unsubContinue();
     });
 
     // Player HP label (world-space, updated per frame)
@@ -660,7 +662,7 @@ export default abstract class CombatScene extends Phaser.Scene {
       this.cameras.main.flash(800, 255, 220, 0);
     } else {
       this.enemiesDefeated++;
-      gameBridge.emit('zone_progress_updated', { zone: this.scene.key, enemiesDefeated: this.enemiesDefeated });
+      gameBridge.emit('zone_progress_updated', { zone: this.scene.key, enemiesDefeated: this.enemiesDefeated, runScore: this.runScore });
       if (this.enemiesDefeated >= this.requiredDefeatsToBoss && !this.bossSpawned) {
         this.spawnBoss();
       }
@@ -719,7 +721,25 @@ export default abstract class CombatScene extends Phaser.Scene {
     this.player.body?.setEnable(false);
     audioManager.playSfx('playerDie');
     audioManager.stopMusic();
-    gameBridge.emit('player_died', { zone: this.scene.key });
+    gameBridge.emit('player_died', {
+      zone: this.scene.key,
+      runScore: this.runScore,
+      enemiesDefeated: this.enemiesDefeated,
+      requiredDefeatsToBoss: this.requiredDefeatsToBoss,
+      bossSpawned: this.bossSpawned,
+    });
+  }
+
+  // Paid continue: revive exactly where the player fell — kill count, score,
+  // and boss-spawn progress are untouched, only HP and player state reset.
+  protected reviveInPlace() {
+    this.playerDead = false;
+    this.playerHP = this.playerMaxHP;
+    this.player.clearTint();
+    this.player.body?.setEnable(true);
+    this.player.setPosition(WORLD_W / 2, WORLD_H - 200);
+    gameBridge.emit('player_health_changed', { hp: this.playerHP });
+    audioManager.playMusic(this.bossSpawned ? 'boss' : 'combat');
   }
 
   private collectLoot(player: any, loot: any) {

@@ -35,7 +35,7 @@ export interface PlayerData {
   activeAbility: string | null;
   pendingRewards: string[];
   onboarded: boolean;          // has the player completed the Guildmaster tutorial?
-  zoneProgress: Record<string, { enemiesDefeated: number }>;  // mid-zone kill progress, keyed by scene key
+  zoneProgress: Record<string, { enemiesDefeated: number; runScore: number }>;  // mid-zone kill/score progress, keyed by scene key — drives death-continue resume
   currentZone: string | null;  // which zone scene "Continue" should resume into
   lastProgressSync?: {        // last "Commit Progress" on-chain sync
     level: number;

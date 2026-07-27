@@ -40,6 +40,7 @@ contract DeployFable is Script {
     uint256 constant ZONE_OBSIDIAN_PEAK  = 3;
     uint256 constant ZONE_SUNFALL_DUNES  = 4;
     uint256 constant ZONE_ENTRY_FEE      = 50 ether;
+    uint256 constant CONTINUE_FEE        = 30 ether;
 
     function run() external {
         uint256 deployerKey = vm.envUint("PRIVATE_KEY");
@@ -86,6 +87,10 @@ contract DeployFable is Script {
         session.setZoneReward(ZONE_EMBER_FIELDS, 500 ether);
         session.setZoneReward(ZONE_ASHWATER_MARSH, 700 ether);
         session.setZoneReward(ZONE_OBSIDIAN_PEAK, 900 ether);
+
+        // Flat FABLE cost to resume after dying mid-run (score-so-far banked,
+        // kill count preserved client-side) — same fee across every zone.
+        session.setContinueFee(CONTINUE_FEE);
 
         // Tavern weapon catalog — 6 individually priced NFTs, no rarity tiers.
         // weaponId order matches lib/nft.ts's TAVERN_WEAPONS list exactly.

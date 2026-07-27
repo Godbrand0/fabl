@@ -7,6 +7,7 @@ import { dbService } from '../lib/supabaseClient';
 import { audioManager } from '../lib/audio';
 import { MapPin, Flame, Award } from 'lucide-react';
 import LevelClearScreen from './LevelClearScreen';
+import DeathScreen from './DeathScreen';
 import MiniMap from './MiniMap';
 
 interface HUDProps {
@@ -38,6 +39,8 @@ export default function HUD({
   const [inLevelClear, setInLevelClear] = useState(false);
   const [levelClearZone, setLevelClearZone] = useState<string>('');
   const [levelClearScore, setLevelClearScore] = useState(0);
+  const [inDeathScreen, setInDeathScreen] = useState(false);
+  const [deathInfo, setDeathInfo] = useState<{ zone: string; runScore: number; enemiesDefeated: number; requiredDefeatsToBoss: number; bossSpawned: boolean } | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
 
@@ -57,9 +60,9 @@ export default function HUD({
 
     // 2. Mid-zone kill progress — update locally every kill, persist every 5th
     //    (and whenever the menu is opened) to avoid a write per kill.
-    const unsubZoneProgress = gameBridge.on('zone_progress_updated', (data: { zone: string; enemiesDefeated: number }) => {
+    const unsubZoneProgress = gameBridge.on('zone_progress_updated', (data: { zone: string; enemiesDefeated: number; runScore: number }) => {
       setPlayerData((prev: any) => {
-        const zoneProgress = { ...(prev.zoneProgress || {}), [data.zone]: { enemiesDefeated: data.enemiesDefeated } };
+        const zoneProgress = { ...(prev.zoneProgress || {}), [data.zone]: { enemiesDefeated: data.enemiesDefeated, runScore: data.runScore } };
         const updated = { ...prev, zoneProgress };
         if (data.enemiesDefeated % 5 === 0) dbService.savePlayer(updated);
         return updated;
@@ -157,13 +160,17 @@ export default function HUD({
       }, 50);
     });
 
-    // 9. Death Handler — restarts the current zone fresh with HP restored
-    const unsubDeath = gameBridge.on('player_died', () => {
-      showFlashMessage('YOU DIED! Retrying zone...');
-      setTimeout(() => {
-        setPlayerData((prev: any) => ({ ...prev, hp: prev.maxHp }));
-        gameBridge.emit('restart_zone');
-      }, 2000);
+    // 9. Death Handler — shows the Died screen (quit vs. pay-to-continue),
+    // both of which require a signature before the player can proceed.
+    const unsubDeath = gameBridge.on('player_died', (data: any) => {
+      setDeathInfo({
+        zone: data.zone,
+        runScore: data.runScore ?? 0,
+        enemiesDefeated: data.enemiesDefeated ?? 0,
+        requiredDefeatsToBoss: data.requiredDefeatsToBoss ?? 8,
+        bossSpawned: !!data.bossSpawned,
+      });
+      setInDeathScreen(true);
     });
 
     // Retry requesting scene info after Phaser has had time to boot.
@@ -322,6 +329,26 @@ export default function HUD({
           fableBalance={fableBalance}
           refreshBalance={refreshBalance}
           onContinue={() => setInLevelClear(false)}
+        />
+      )}
+
+      {/* Death overlay — quit (signed checkpoint) or pay to continue (signed + FABLE burn) */}
+      {inDeathScreen && deathInfo && (
+        <DeathScreen
+          zone={deathInfo.zone}
+          runScore={deathInfo.runScore}
+          enemiesDefeated={deathInfo.enemiesDefeated}
+          requiredDefeatsToBoss={deathInfo.requiredDefeatsToBoss}
+          bossSpawned={deathInfo.bossSpawned}
+          playerData={playerData}
+          setPlayerData={setPlayerData}
+          walletAddress={walletAddress || playerData?.wallet_address || undefined}
+          walletConnected={walletConnected}
+          connectWallet={connectWallet}
+          fableBalance={fableBalance}
+          refreshBalance={refreshBalance}
+          onQuit={() => setInDeathScreen(false)}
+          onContinue={() => setInDeathScreen(false)}
         />
       )}
     </div>
