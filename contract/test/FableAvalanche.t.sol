@@ -313,21 +313,24 @@ contract FableAvalancheTest is Test {
         assertEq(shop.statPointsBought(player1), 2);
     }
 
-    // ── FableLeaderboard: weekly payout ──────────────────────────────────────
-    function test_WeeklyPrizeDistribution() public {
+    // ── FableLeaderboard: score ledger ───────────────────────────────────────
+    // getAllScores must return every raised-best-score submission for the
+    // week, unfiltered and uncapped — the raw material a campaign payout
+    // reconstructs an arbitrary sub-week window from.
+    function test_GetAllScoresReturnsFullUnfilteredHistory() public {
         vm.prank(address(session));
         leaderboard.submitScore(player1, 100 ether, 1);
         vm.prank(address(session));
         leaderboard.submitScore(player2, 50 ether, 1);
+        vm.prank(address(session));
+        leaderboard.submitScore(player1, 130 ether, 1); // player1 improves — second entry
 
-        uint256 week = leaderboard.currentWeek();
-        vm.warp(block.timestamp + 8 days);
-
-        vm.deal(admin, 10 ether);
-        vm.prank(admin);
-        leaderboard.distributeWeeklyPrizes{ value: 10 ether }(week);
-
-        assertEq(player1.balance, 1.2 ether); // rank 1 = 1200 bps
-        assertEq(player2.balance, 0.8 ether); // rank 2 = 800 bps
+        FableLeaderboard.Entry[] memory all = leaderboard.getAllScores(leaderboard.currentWeek());
+        assertEq(all.length, 3);
+        assertEq(all[0].player, player1);
+        assertEq(all[0].score, 100 ether);
+        assertEq(all[1].player, player2);
+        assertEq(all[2].player, player1);
+        assertEq(all[2].score, 130 ether);
     }
 }

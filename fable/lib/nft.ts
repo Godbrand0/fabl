@@ -94,6 +94,21 @@ export const FABLE_SHOP_ABI = parseAbi([
   'event StatPointBought(address indexed player, uint256 cost, uint256 totalBought)',
 ]);
 
+// FableLeaderboard — every clearZone/submitCheckpoint/continueRun call that
+// raises a player's best-of-week score lands here via FableGameSession.
+// Read-only on the frontend today (server-side admin campaign payouts —
+// see app/api/admin/campaigns — read this as the tamper-proof source of
+// who actually earned a top-N spot; the Supabase `leaderboard` table is
+// display-only and client-writable, never authoritative for a real payout).
+export const FABLE_LEADERBOARD_ADDRESS = (
+  process.env.NEXT_PUBLIC_FABLE_LEADERBOARD_ADDRESS || ''
+) as `0x${string}`;
+
+export const FABLE_LEADERBOARD_ABI = parseAbi([
+  'function currentWeek() view returns (uint256)',
+  'function getAllScores(uint256 week) view returns (tuple(address player, uint256 score, uint256 timestamp)[])',
+]);
+
 // Zone scene name → level ID (used for on-chain reward/entry-fee tracking)
 export const ZONE_LEVEL_IDS: Record<string, number> = {
   EmberFieldsScene:   1,
