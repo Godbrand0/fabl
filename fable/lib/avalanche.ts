@@ -269,23 +269,26 @@ export const avalancheService = {
   // Player-signed: submit this run's score using the game server's
   // attestation. Repeatable — the zone's fixed FABLE reward only mints the
   // first time a player clears it, but score submission works every run.
+  // Returns the tx hash on success so callers can log an audit record
+  // (see dbService.recordLevelRewardClaim) — the chain is the source of
+  // truth for whether FABLE actually minted, this is just bookkeeping.
   async clearZone(
     walletAddress: string,
     zoneId: number,
     score: number,
     deadline: number,
     signature: `0x${string}`,
-  ): Promise<boolean> {
-    if (!FABLE_GAME_SESSION_ADDRESS) return false;
+  ): Promise<{ success: boolean; hash?: string }> {
+    if (!FABLE_GAME_SESSION_ADDRESS) return { success: false };
 
     if (!this.getWalletClient()) {
-      return false; // mock wallet in dev — nothing on-chain to submit to
+      return { success: false }; // mock wallet in dev — nothing on-chain to submit to
     }
 
     try {
       await this.ensureAvalancheNetwork();
       const walletClient = this.getWalletClient(walletAddress as `0x${string}`);
-      if (!walletClient) return false;
+      if (!walletClient) return { success: false };
 
       const { request } = await publicClient.simulateContract({
         account: walletAddress as `0x${string}`,
@@ -296,10 +299,10 @@ export const avalancheService = {
       });
       const hash = await walletClient.writeContract(request);
       const receipt = await publicClient.waitForTransactionReceipt({ hash });
-      return receipt.status === 'success';
+      return { success: receipt.status === 'success', hash };
     } catch (err) {
       console.error('clearZone failed:', err);
-      return false;
+      return { success: false };
     }
   },
 

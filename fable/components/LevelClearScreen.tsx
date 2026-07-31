@@ -113,10 +113,20 @@ export default function LevelClearScreen({
       if (!res.ok) throw new Error(attestation.error || 'Attestation failed');
 
       const zoneId = ZONE_LEVEL_IDS[clearedZone];
-      const success = await avalancheService.clearZone(
+      const { success, hash } = await avalancheService.clearZone(
         addr, zoneId, attestation.score, attestation.deadline, attestation.signature,
       );
       if (!success) throw new Error('Submit tx failed');
+
+      // Best-effort Supabase mirror for the admin dashboard (FABLE earned,
+      // zone clears) — the chain is already the source of truth for the
+      // mint/score itself, so a failure here must never block progression.
+      try {
+        if (hash) await dbService.recordLevelRewardClaim(addr, zoneId, clearedZone, zoneReward, hash);
+        await dbService.updateLeaderboard(addr, playerData.name, runScore, 1);
+      } catch (mirrorErr) {
+        console.error('Supabase clear-zone mirror failed (chain tx already succeeded):', mirrorErr);
+      }
 
       setSubmitted(true);
       await refreshBalance();

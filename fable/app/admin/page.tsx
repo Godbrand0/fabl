@@ -26,6 +26,33 @@ function shortAddr(addr: string): string {
 }
 
 export default function AdminDashboard() {
+  // globals.css locks html AND body to overflow:hidden + position:fixed +
+  // height:100% for the game's full-screen mobile view — this is an
+  // ordinary content page, so undo that lock on both elements while
+  // mounted (touching only body left html pinned to one viewport tall,
+  // which made body scroll *inside* that fixed box instead of the page
+  // growing normally) and restore it on unmount.
+  useEffect(() => {
+    const elements = [document.documentElement, document.body];
+    const prev = elements.map((el) => ({
+      overflow: el.style.overflow,
+      position: el.style.position,
+      height: el.style.height,
+    }));
+    elements.forEach((el) => {
+      el.style.overflow = 'auto';
+      el.style.position = 'static';
+      el.style.height = 'auto';
+    });
+    return () => {
+      elements.forEach((el, i) => {
+        el.style.overflow = prev[i].overflow;
+        el.style.position = prev[i].position;
+        el.style.height = prev[i].height;
+      });
+    };
+  }, []);
+
   const [authed, setAuthed] = useState<boolean | null>(null);
   const [password, setPassword] = useState('');
   const [loginError, setLoginError] = useState('');
