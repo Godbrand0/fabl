@@ -1,13 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createPublicClient, createWalletClient, http, parseEther } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
-import { avalanche } from 'viem/chains';
 import { FABLE_TOKEN_ADDRESS, FABLE_TOKEN_ABI, ZONE_LEVEL_IDS, ZONE_LEVEL_REWARDS } from '../../../lib/nft';
 import { dbService } from '../../../lib/supabaseClient';
+import { activeChain, AVALANCHE_RPC_URL } from '../../../lib/chain';
 
-const RPC = process.env.NEXT_PUBLIC_AVALANCHE_RPC_URL || 'https://api.avax.network/ext/bc/C/rpc';
-
-const serverClient = createPublicClient({ chain: avalanche, transport: http(RPC) });
+const serverClient = createPublicClient({ chain: activeChain, transport: http(AVALANCHE_RPC_URL) });
 
 // Server-verified mint: the admin wallet is registered as a FableToken game
 // contract (see contract/script/DeployFable.s.sol), so it can mint FABLE
@@ -35,7 +33,7 @@ export async function POST(req: NextRequest) {
     }
 
     const adminAccount = privateKeyToAccount(adminKey as `0x${string}`);
-    const adminWallet  = createWalletClient({ account: adminAccount, chain: avalanche, transport: http(RPC) });
+    const adminWallet  = createWalletClient({ account: adminAccount, chain: activeChain, transport: http(AVALANCHE_RPC_URL) });
 
     let totalReward = 0;
     for (const zone of zones) {

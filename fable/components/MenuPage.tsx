@@ -654,7 +654,7 @@ export default function MenuPage({
                           <span className="text-[15px] font-extrabold text-emerald-300 leading-none">
                             {parseFloat(avaxBalance).toLocaleString(undefined, { maximumFractionDigits: 4 })}
                           </span>
-                          <button onClick={refreshBalance} className="text-emerald-700 hover:text-emerald-400 ml-auto">
+                          <button onClick={() => refreshBalance()} className="text-emerald-700 hover:text-emerald-400 ml-auto">
                             <RefreshCw size={9} />
                           </button>
                         </div>
@@ -666,7 +666,7 @@ export default function MenuPage({
                           <span className="text-[15px] font-extrabold text-purple-300 leading-none">
                             {parseFloat(fableBalance).toLocaleString(undefined, { maximumFractionDigits: 2 })}
                           </span>
-                          <button onClick={refreshBalance} className="text-purple-700 hover:text-purple-400 ml-auto">
+                          <button onClick={() => refreshBalance()} className="text-purple-700 hover:text-purple-400 ml-auto">
                             <RefreshCw size={9} />
                           </button>
                         </div>

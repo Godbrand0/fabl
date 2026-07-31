@@ -51,6 +51,9 @@ CREATE TABLE IF NOT EXISTS public.players (
     activeability       TEXT                 DEFAULT NULL,
     pendingrewards      TEXT[]      NOT NULL DEFAULT '{}',
 
+    -- Active FableShop temp buff, cleared on zone transition
+    tempbuff             TEXT                 DEFAULT NULL,
+
     -- Last on-chain progress commit
     lastprogresssync    JSONB                DEFAULT NULL,  -- { level, gold, txHash, syncedAt }
 
@@ -73,7 +76,8 @@ ALTER TABLE public.players
     ADD COLUMN IF NOT EXISTS pendingrewards TEXT[] NOT NULL DEFAULT '{}',
     ADD COLUMN IF NOT EXISTS onboarded      BOOLEAN NOT NULL DEFAULT false,
     ADD COLUMN IF NOT EXISTS zone_progress  JSONB NOT NULL DEFAULT '{}'::jsonb,
-    ADD COLUMN IF NOT EXISTS current_zone   TEXT DEFAULT NULL;
+    ADD COLUMN IF NOT EXISTS current_zone   TEXT DEFAULT NULL,
+    ADD COLUMN IF NOT EXISTS tempbuff       TEXT DEFAULT NULL;
 
 -- Back-fill existing players so they don't see the new-player tutorial retroactively
 UPDATE public.players SET onboarded = true WHERE level > 1 OR maxunlockedzone > 1;

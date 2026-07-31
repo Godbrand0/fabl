@@ -140,6 +140,7 @@ export default function LevelClearScreen({
           addr = (await avalancheService.getConnectedAddress()) ?? '';
         }
         if (addr) await avalancheService.enterZone(addr, ZONE_LEVEL_IDS[nextScene]);
+        await refreshBalance();
       } catch (err) {
         console.error('enterZone failed (continuing anyway):', err);
       } finally {

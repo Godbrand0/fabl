@@ -208,9 +208,14 @@ export default abstract class CombatScene extends Phaser.Scene {
     // On a paid continue after death: revive in place, kill count and score
     // intact — no scene restart, no enemies un-killed.
     const unsubContinue = gameBridge.on('continue_run', () => { this.reviveInPlace(); });
+    // On "Quit to Menu" after death: the pause menu overlays the game without
+    // unmounting it, so the dead player (grey tint, disabled body) would
+    // otherwise sit frozen underneath forever. Restart the scene to match
+    // handleQuit's zoneProgress reset — next visit starts this zone fresh.
+    const unsubQuit = gameBridge.on('quit_run', () => { this.scene.restart(); });
     this.events.on('destroy', () => {
       unsubL(); unsubR(); unsubA(); unsubSI(); unsubNext(); unsubW();
-      unsubPause(); unsubResume(); unsubContinue();
+      unsubPause(); unsubResume(); unsubContinue(); unsubQuit();
     });
 
     // Player HP label (world-space, updated per frame)
@@ -743,7 +748,7 @@ export default abstract class CombatScene extends Phaser.Scene {
   }
 
   private collectLoot(player: any, loot: any) {
-    const heal = 10;
+    const heal = Phaser.Math.Between(5, 8);
     this.playerHP = Math.min(this.playerMaxHP, this.playerHP + heal);
     audioManager.playSfx('heal');
     this.showFloatingText(loot.x, loot.y - 8, `+${heal} HP`, '#EF2929');

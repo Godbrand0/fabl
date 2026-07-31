@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { privateKeyToAccount } from 'viem/accounts';
 import { encodePacked, keccak256 } from 'viem';
-import { avalanche } from 'viem/chains';
 import { FABLE_GAME_SESSION_ADDRESS, ZONE_LEVEL_IDS, ATTEST_ACTION, AttestAction } from '../../../lib/nft';
+import { activeChain } from '../../../lib/chain';
 
 const ATTESTATION_TTL_SECONDS = 15 * 60;
 
@@ -58,7 +58,7 @@ export async function POST(req: NextRequest) {
 
     const hash = keccak256(encodePacked(
       ['address', 'uint256', 'uint8', 'address', 'uint256', 'uint256', 'uint256'],
-      [FABLE_GAME_SESSION_ADDRESS, BigInt(avalanche.id), actionTag, walletAddress as `0x${string}`, BigInt(zoneId), BigInt(roundedScore), BigInt(deadline)],
+      [FABLE_GAME_SESSION_ADDRESS, BigInt(activeChain.id), actionTag, walletAddress as `0x${string}`, BigInt(zoneId), BigInt(roundedScore), BigInt(deadline)],
     ));
 
     const signature = await gameServerAccount.signMessage({ message: { raw: hash } });

@@ -86,6 +86,7 @@ export default function DeathScreen({
         return updated;
       });
 
+      gameBridge.emit('quit_run');
       gameBridge.emit('open_menu');
       onQuit();
     } catch (err) {

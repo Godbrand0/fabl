@@ -117,5 +117,16 @@ contract DeployFable is Script {
         console2.log("FableNFT:         ", address(nft));
         console2.log("FableMarket:      ", address(market));
         console2.log("FableShop:        ", address(shop));
+
+        // NOT set here on purpose: nft.setBaseURI(...). tokenURI(id) returns
+        // baseURI + id — until the frontend is deployed somewhere public,
+        // there's no real URL for it to point at (app/api/nft-metadata
+        // serves it once one exists). Until then, tokenURI resolves to a
+        // bare number and NFT explorers (Snowtrace etc.) can't render
+        // metadata/images for these tokens — the in-game display is
+        // unaffected since it reads weaponOf(tokenId) against its own
+        // local catalog, not tokenURI. Call
+        // `cast send <FableNFT> "setBaseURI(string)" "<url>/api/nft-metadata/"`
+        // once a public URL exists.
     }
 }

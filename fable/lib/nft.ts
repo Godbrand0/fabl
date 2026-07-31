@@ -105,8 +105,9 @@ export const FABLE_LEADERBOARD_ADDRESS = (
 ) as `0x${string}`;
 
 export const FABLE_LEADERBOARD_ABI = parseAbi([
+  'struct Entry { address player; uint256 score; uint256 timestamp; }',
   'function currentWeek() view returns (uint256)',
-  'function getAllScores(uint256 week) view returns (tuple(address player, uint256 score, uint256 timestamp)[])',
+  'function getAllScores(uint256 week) view returns (Entry[])',
 ]);
 
 // Zone scene name → level ID (used for on-chain reward/entry-fee tracking)

@@ -1,10 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createPublicClient, createWalletClient, http, parseEther } from 'viem';
-import { avalanche } from 'viem/chains';
 import { privateKeyToAccount } from 'viem/accounts';
 import { createClient } from '@supabase/supabase-js';
+import { activeChain, AVALANCHE_RPC_URL } from '../../../lib/chain';
 
-const AVALANCHE_RPC = process.env.NEXT_PUBLIC_AVALANCHE_RPC_URL || 'https://api.avax.network/ext/bc/C/rpc';
 const FUNDING_AMOUNT = parseEther('0.01'); // 0.01 AVAX — enough for ~10+ gameplay txs
 
 const supabase = createClient(
@@ -40,8 +39,8 @@ export async function POST(req: NextRequest) {
     }
 
     const account = privateKeyToAccount(adminKey as `0x${string}`);
-    const publicClient = createPublicClient({ chain: avalanche, transport: http(AVALANCHE_RPC) });
-    const walletClient = createWalletClient({ account, chain: avalanche, transport: http(AVALANCHE_RPC) });
+    const publicClient = createPublicClient({ chain: activeChain, transport: http(AVALANCHE_RPC_URL) });
+    const walletClient = createWalletClient({ account, chain: activeChain, transport: http(AVALANCHE_RPC_URL) });
 
     // Check admin balance
     const balance = await publicClient.getBalance({ address: account.address });

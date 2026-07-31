@@ -1,10 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createPublicClient, http } from 'viem';
-import { avalanche } from 'viem/chains';
 import { FABLE_NFT_ADDRESS, FABLE_NFT_ABI, AVAX_ITEMS } from '../../../../lib/nft';
+import { activeChain, AVALANCHE_RPC_URL } from '../../../../lib/chain';
 
-const RPC = process.env.NEXT_PUBLIC_AVALANCHE_RPC_URL || 'https://api.avax.network/ext/bc/C/rpc';
-const publicClient = createPublicClient({ chain: avalanche, transport: http(RPC) });
+const publicClient = createPublicClient({ chain: activeChain, transport: http(AVALANCHE_RPC_URL) });
 
 const METADATA: Record<string, object> = {
   iron_sword: {

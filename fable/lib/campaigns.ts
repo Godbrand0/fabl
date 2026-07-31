@@ -1,12 +1,9 @@
 import { createPublicClient, createWalletClient, http, parseEther } from 'viem';
-import { avalanche, avalancheFuji } from 'viem/chains';
 import { privateKeyToAccount } from 'viem/accounts';
 import { FABLE_LEADERBOARD_ADDRESS, FABLE_LEADERBOARD_ABI } from './nft';
+import { activeChain, AVALANCHE_RPC_URL } from './chain';
 
-const RPC_URL = process.env.NEXT_PUBLIC_AVALANCHE_RPC_URL || 'https://api.avax.network/ext/bc/C/rpc';
-const chain = RPC_URL.includes('avax-test') ? avalancheFuji : avalanche;
-
-const publicClient = createPublicClient({ chain, transport: http(RPC_URL) });
+const publicClient = createPublicClient({ chain: activeChain, transport: http(AVALANCHE_RPC_URL) });
 
 const WEEK_SECONDS = 7 * 24 * 60 * 60;
 
@@ -64,7 +61,7 @@ export async function sendAvax(to: string, amountAvax: number): Promise<string> 
   if (!key) throw new Error('ADMIN_PRIVATE_KEY not configured');
 
   const account = privateKeyToAccount(key as `0x${string}`);
-  const walletClient = createWalletClient({ account, chain, transport: http(RPC_URL) });
+  const walletClient = createWalletClient({ account, chain: activeChain, transport: http(AVALANCHE_RPC_URL) });
 
   const hash = await walletClient.sendTransaction({
     to: to as `0x${string}`,

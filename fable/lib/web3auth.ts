@@ -3,6 +3,8 @@
 // Lazy-initialised Web3Auth v9 singleton
 // This module must only run on the client side.
 
+import { activeChain, activeChainIdHex, AVALANCHE_RPC_URL } from './chain';
+
 let web3authInstance: any = null;
 let isInitialized = false;
 
@@ -15,16 +17,6 @@ const clientId =
 // Mainnet requires the project to be explicitly upgraded there).
 const web3AuthNetwork = process.env.NEXT_PUBLIC_WEB3AUTH_NETWORK || 'sapphire_devnet';
 
-const AVALANCHE_CHAIN_CONFIG = {
-  chainNamespace: 'eip155',
-  chainId: '0xa86a', // Avalanche C-Chain mainnet 43114
-  rpcTarget: 'https://api.avax.network/ext/bc/C/rpc',
-  displayName: 'Avalanche C-Chain',
-  blockExplorerUrl: 'https://snowtrace.io/',
-  ticker: 'AVAX',
-  tickerName: 'Avalanche',
-};
-
 async function getWeb3Auth() {
   if (web3authInstance) return web3authInstance;
 
@@ -36,9 +28,9 @@ async function getWeb3Auth() {
     config: {
       chainConfig: {
         chainNamespace: CHAIN_NAMESPACES.EIP155,
-        chainId: '0xa86a',
-        rpcTarget: 'https://api.avax.network/ext/bc/C/rpc',
-        displayName: 'Avalanche C-Chain',
+        chainId: activeChainIdHex,
+        rpcTarget: AVALANCHE_RPC_URL,
+        displayName: activeChain.name,
         ticker: 'AVAX',
         tickerName: 'Avalanche',
       },

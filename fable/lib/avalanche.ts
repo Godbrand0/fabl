@@ -1,13 +1,11 @@
 import { createPublicClient, createWalletClient, custom, http, formatEther, parseEther, WalletClient } from 'viem';
-import { avalanche } from 'viem/chains';
 import { FABLE_NFT_ADDRESS, FABLE_NFT_ABI, FABLE_TOKEN_ADDRESS, FABLE_TOKEN_ABI, FABLE_GAME_SESSION_ADDRESS, FABLE_GAME_SESSION_ABI, FABLE_SHOP_ADDRESS, FABLE_SHOP_ABI, NftItem } from './nft';
 import { getWeb3AuthProvider } from './web3auth';
-
-const AVALANCHE_RPC = process.env.NEXT_PUBLIC_AVALANCHE_RPC_URL || 'https://api.avax.network/ext/bc/C/rpc';
+import { activeChain, activeChainIdHex, AVALANCHE_RPC_URL } from './chain';
 
 export const publicClient = createPublicClient({
-  chain: avalanche,
-  transport: http(AVALANCHE_RPC),
+  chain: activeChain,
+  transport: http(AVALANCHE_RPC_URL),
 });
 
 export const avalancheService = {
@@ -18,23 +16,25 @@ export const avalancheService = {
   getWalletClient(account?: `0x${string}`): WalletClient | null {
     const web3authProvider = getWeb3AuthProvider();
     if (web3authProvider) {
-      return createWalletClient({ account, chain: avalanche, transport: custom(web3authProvider) });
+      return createWalletClient({ account, chain: activeChain, transport: custom(web3authProvider) });
     }
     if (this.hasInjectedProvider()) {
-      return createWalletClient({ account, chain: avalanche, transport: custom((window as any).ethereum) });
+      return createWalletClient({ account, chain: activeChain, transport: custom((window as any).ethereum) });
     }
     return null;
   },
 
-  // Switch the connected wallet to Avalanche C-Chain. Call before any write transaction.
+  // Switch the connected wallet to whichever Avalanche network activeChain
+  // resolves to (Fuji or mainnet, driven by NEXT_PUBLIC_AVALANCHE_RPC_URL).
+  // Call before any write transaction.
   async ensureAvalancheNetwork(): Promise<void> {
     const web3authProvider = getWeb3AuthProvider();
-    if (web3authProvider) return; // Web3Auth is pre-configured for Avalanche
+    if (web3authProvider) return; // Web3Auth is pre-configured for the active chain
     if (!this.hasInjectedProvider()) return;
     try {
       await (window as any).ethereum.request({
         method: 'wallet_switchEthereumChain',
-        params: [{ chainId: '0xa86a' }], // 43114 in hex
+        params: [{ chainId: activeChainIdHex }],
       });
     } catch (switchError: any) {
       // Chain not added to wallet — add it
@@ -42,11 +42,11 @@ export const avalancheService = {
         await (window as any).ethereum.request({
           method: 'wallet_addEthereumChain',
           params: [{
-            chainId: '0xa86a',
-            chainName: 'Avalanche C-Chain',
+            chainId: activeChainIdHex,
+            chainName: activeChain.name,
             nativeCurrency: { name: 'Avalanche', symbol: 'AVAX', decimals: 18 },
-            rpcUrls: [AVALANCHE_RPC],
-            blockExplorerUrls: ['https://snowtrace.io'],
+            rpcUrls: [AVALANCHE_RPC_URL],
+            blockExplorerUrls: [activeChain.blockExplorers?.default?.url || 'https://snowtrace.io'],
           }],
         });
       } else {
@@ -124,7 +124,7 @@ export const avalancheService = {
         account: from as `0x${string}`,
         to: to as `0x${string}`,
         value: parseEther(amountAvax.toString()),
-        chain: avalanche,
+        chain: activeChain,
       });
       const receipt = await publicClient.waitForTransactionReceipt({ hash });
       return receipt.status === 'success';
