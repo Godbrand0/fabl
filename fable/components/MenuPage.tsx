@@ -11,13 +11,13 @@ import BankModal from './BankModal';
 import GuidedTour, { TOUR_STEPS } from './GuidedTour';
 import NFTDetailModal from './NFTDetailModal';
 import StarterWeaponModal from './StarterWeaponModal';
-import { dbService } from '../lib/supabaseClient';
+import { dbService, LeaderboardEntry } from '../lib/supabaseClient';
 import { avalancheService } from '../lib/avalanche';
 import { audioManager } from '../lib/audio';
 import gameBridge from '../game/systems/GameBridge';
 import { AVAX_ITEMS, STAT_POINT_FIRST_COST, STAT_POINT_COST } from '../lib/nft';
 
-type Section = 'nav' | 'tavern' | 'bank' | 'marketplace' | 'stats' | 'profile' | 'codex' | 'loadout' | 'settings';
+type Section = 'nav' | 'tavern' | 'bank' | 'marketplace' | 'leaderboard' | 'stats' | 'profile' | 'codex' | 'loadout' | 'settings';
 
 interface MenuPageProps {
   playerData: any;
@@ -37,6 +37,7 @@ const NAV_ITEMS: { id: Section; label: string; icon: React.ReactNode }[] = [
   { id: 'tavern',      label: 'Tavern',        icon: <span>🍺</span> },
   { id: 'bank',        label: 'Bank',          icon: <span>🏦</span> },
   { id: 'marketplace', label: 'Marketplace',   icon: <span>🛒</span> },
+  { id: 'leaderboard', label: 'Leaderboard',   icon: <Award size={14} /> },
   { id: 'stats',       label: 'Stats',         icon: <User size={14} /> },
   { id: 'profile',     label: 'Profile',       icon: <User size={14} /> },
   { id: 'codex',       label: 'Codex / Map',   icon: <BookOpen size={14} /> },
@@ -88,11 +89,22 @@ export default function MenuPage({
   const [selectedNft, setSelectedNft] = useState<any | null>(null);
   const [showStarterWeapon, setShowStarterWeapon] = useState(false);
   const [allocatingStat, setAllocatingStat] = useState(false);
+  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[] | null>(null);
+  const [leaderboardLoading, setLeaderboardLoading] = useState(false);
 
   const showFlashMessage = (msg: string) => {
     setMessage(msg);
     setTimeout(() => setMessage(null), 4000);
   };
+
+  React.useEffect(() => {
+    if (section !== 'leaderboard' || leaderboard !== null) return;
+    setLeaderboardLoading(true);
+    dbService.getLeaderboard()
+      .then(setLeaderboard)
+      .catch(err => { console.error('getLeaderboard failed:', err); setLeaderboard([]); })
+      .finally(() => setLeaderboardLoading(false));
+  }, [section, leaderboard]);
 
   const hasProgress = (playerData.level > 1) || ((playerData.maxUnlockedZone || 1) > 1);
 
@@ -331,6 +343,88 @@ export default function MenuPage({
                   <p className="text-xs max-w-xs">Player-to-player trading is coming soon.</p>
                 </div>
               )}
+
+              {/* LEADERBOARD */}
+              {section === 'leaderboard' && (() => {
+                const myAddr = (walletAddress || playerData?.wallet_address || '').toLowerCase();
+                const medals = ['🥇', '🥈', '🥉'];
+                return (
+                  <div className="flex flex-col gap-4 w-full">
+                    <div className="flex flex-col gap-1">
+                      <span className="text-[10px] font-extrabold text-yellow-400 uppercase tracking-[0.18em] flex items-center gap-1.5">
+                        <Award size={12} /> Global Rankings
+                      </span>
+                      <h2 className="text-2xl font-extrabold text-transparent bg-clip-text bg-linear-to-r from-yellow-300 to-amber-600 leading-tight">
+                        Leaderboard
+                      </h2>
+                      <span className="text-[11px] text-zinc-500">Ranked by total score across all zones.</span>
+                    </div>
+
+                    <div className="flex items-center justify-between mt-1">
+                      <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Top Adventurers</span>
+                      <button
+                        onClick={() => setLeaderboard(null)}
+                        className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-zinc-500 hover:text-zinc-300"
+                        title="Refresh"
+                      >
+                        <RefreshCw size={10} /> Refresh
+                      </button>
+                    </div>
+
+                    {leaderboardLoading ? (
+                      <div className="flex flex-col items-center justify-center py-10 gap-2 text-zinc-500">
+                        <span className="text-2xl animate-pulse">🏆</span>
+                        <span className="text-xs">Loading leaderboard...</span>
+                      </div>
+                    ) : leaderboard && leaderboard.length > 0 ? (
+                      <div className="flex flex-col gap-2.5">
+                        {leaderboard.map((entry, i) => {
+                          const isMe = entry.wallet_address?.toLowerCase() === myAddr;
+                          return (
+                            <div
+                              key={entry.wallet_address}
+                              className={`flex items-center gap-3 px-3.5 py-2.5 rounded-xl border ${
+                                isMe
+                                  ? 'bg-purple-900/35 border-purple-700'
+                                  : i < 3
+                                  ? 'bg-amber-950/20 border-amber-800/40'
+                                  : 'bg-zinc-900/60 border-zinc-800'
+                              }`}
+                            >
+                              <span className={`w-6 text-center shrink-0 font-extrabold ${i < 3 ? 'text-lg' : 'text-sm text-zinc-500'}`}>
+                                {medals[i] ?? `#${i + 1}`}
+                              </span>
+                              <div className="flex flex-col min-w-0 flex-1">
+                                <span className={`text-xs font-bold truncate ${isMe ? 'text-purple-200' : 'text-zinc-200'}`}>
+                                  {entry.player_name || 'Hero'} {isMe && <span className="text-purple-400 font-extrabold">(You)</span>}
+                                </span>
+                                <span className="text-[9px] text-zinc-500">{entry.zone_clears} zone{entry.zone_clears === 1 ? '' : 's'} cleared</span>
+                              </div>
+                              <span className="text-sm font-extrabold text-yellow-400 shrink-0 tabular-nums">{entry.score.toLocaleString()}</span>
+                            </div>
+                          );
+                        })}
+                        {Array.from({ length: Math.max(0, 10 - leaderboard.length) }, (_, i) => (
+                          <div
+                            key={`empty-${i}`}
+                            className="flex items-center gap-3 px-3.5 py-2.5 rounded-xl border border-dashed border-zinc-800/70"
+                          >
+                            <span className="w-6 text-center shrink-0 font-extrabold text-sm text-zinc-700">
+                              #{leaderboard.length + i + 1}
+                            </span>
+                            <span className="text-[10px] text-zinc-700 italic">Open slot — clear a zone to claim it</span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="flex flex-col items-center justify-center py-10 gap-2 text-zinc-500 text-center">
+                        <span className="text-3xl">🏆</span>
+                        <p className="text-xs max-w-xs">No scores yet. Clear a zone to claim the top spot!</p>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
 
               {/* SETTINGS */}
               {section === 'settings' && (
