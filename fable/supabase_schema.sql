@@ -64,6 +64,9 @@ CREATE TABLE IF NOT EXISTS public.players (
     zone_progress       JSONB       NOT NULL DEFAULT '{}'::jsonb,  -- { [sceneKey]: { enemiesDefeated } }
     current_zone        TEXT                 DEFAULT NULL,
 
+    -- Referrals: the inviting player's wallet_address, captured at character creation via ?ref=
+    referred_by         TEXT                 REFERENCES public.players(wallet_address),
+
     -- Timestamps
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -77,7 +80,8 @@ ALTER TABLE public.players
     ADD COLUMN IF NOT EXISTS onboarded      BOOLEAN NOT NULL DEFAULT false,
     ADD COLUMN IF NOT EXISTS zone_progress  JSONB NOT NULL DEFAULT '{}'::jsonb,
     ADD COLUMN IF NOT EXISTS current_zone   TEXT DEFAULT NULL,
-    ADD COLUMN IF NOT EXISTS tempbuff       TEXT DEFAULT NULL;
+    ADD COLUMN IF NOT EXISTS tempbuff       TEXT DEFAULT NULL,
+    ADD COLUMN IF NOT EXISTS referred_by    TEXT REFERENCES public.players(wallet_address);
 
 -- Back-fill existing players so they don't see the new-player tutorial retroactively
 UPDATE public.players SET onboarded = true WHERE level > 1 OR maxunlockedzone > 1;
@@ -152,6 +156,7 @@ CREATE POLICY "claims_insert" ON public.level_reward_claims FOR INSERT WITH CHEC
 CREATE INDEX IF NOT EXISTS idx_leaderboard_score         ON public.leaderboard (score DESC);
 CREATE INDEX IF NOT EXISTS idx_claims_wallet             ON public.level_reward_claims (wallet_address);
 CREATE INDEX IF NOT EXISTS idx_players_level             ON public.players (level DESC);
+CREATE INDEX IF NOT EXISTS idx_players_referred_by        ON public.players (referred_by);
 
 
 -- ── 5. CAMPAIGNS (admin-defined top-N AVAX payouts) ─────────────────────────

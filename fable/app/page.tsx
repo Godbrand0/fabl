@@ -48,6 +48,13 @@ export default function Home() {
   // In-game pause menu (overlays GameContainer + HUD without unmounting them)
   const [showPauseMenu, setShowPauseMenu] = useState(false);
 
+  // Referral capture — ?ref=<inviting wallet address>, consumed once at character creation
+  const [pendingReferral, setPendingReferral] = useState<string | null>(null);
+  useEffect(() => {
+    const ref = new URLSearchParams(window.location.search).get('ref');
+    if (ref && ref.trim()) setPendingReferral(ref.trim().toLowerCase());
+  }, []);
+
   // Splash: 10s progress bar → auth screen
   useEffect(() => {
     const DURATION = 10000;
@@ -192,6 +199,7 @@ export default function Home() {
       onboarded:        false,
       zoneProgress:     {},
       currentZone:      null,
+      referredBy:       pendingReferral && pendingReferral !== walletAddress.toLowerCase() ? pendingReferral : null,
     };
 
     try {

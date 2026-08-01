@@ -37,6 +37,7 @@ export interface PlayerData {
   onboarded: boolean;          // has the player completed the Guildmaster tutorial?
   zoneProgress: Record<string, { enemiesDefeated: number; runScore: number }>;  // mid-zone kill/score progress, keyed by scene key — drives death-continue resume
   currentZone: string | null;  // which zone scene "Continue" should resume into
+  referredBy: string | null;   // wallet_address of the inviting player, captured via ?ref= at signup
   lastProgressSync?: {        // last "Commit Progress" on-chain sync
     level: number;
     txHash: string;
@@ -75,6 +76,7 @@ function withDefaults(p: any): PlayerData {
     onboarded:        p.onboarded         ?? false,
     zoneProgress:     p.zoneProgress      ?? p.zone_progress ?? {},
     currentZone:      p.currentZone       ?? p.current_zone  ?? null,
+    referredBy:       p.referredBy        ?? p.referred_by   ?? null,
     lastProgressSync: p.lastProgressSync  ?? p.lastprogresssync ?? undefined,
   };
 }
@@ -103,6 +105,7 @@ function toDbRow(player: PlayerData) {
     onboarded:        player.onboarded ?? false,
     zone_progress:    player.zoneProgress ?? {},
     current_zone:     player.currentZone ?? null,
+    referred_by:      player.referredBy ?? null,
     lastprogresssync: player.lastProgressSync ?? null,
   };
 }
@@ -199,6 +202,19 @@ export const dbService = {
       (p: any) => p.name?.toLowerCase() === trimmed && p.wallet_address !== 'local_player'
     );
     return found ? withDefaults(found as any) : null;
+  },
+
+  async getReferralCount(walletAddress: string): Promise<number> {
+    const address = walletAddress.toLowerCase();
+    if (supabase) {
+      const { count, error } = await supabase
+        .from('players')
+        .select('*', { count: 'exact', head: true })
+        .eq('referred_by', address);
+      if (!error && count !== null) return count;
+    }
+    const players = JSON.parse(localStorage.getItem(LOCAL_KEY) || '{}');
+    return Object.values(players).filter((p: any) => (p.referredBy ?? p.referred_by) === address).length;
   },
 
   async getLeaderboard(): Promise<LeaderboardEntry[]> {

@@ -4,7 +4,7 @@ import React, { useState } from 'react';
 import Image from 'next/image';
 import {
   Sword, Backpack, User, BookOpen, Award, Heart, Flame,
-  RefreshCw, Gem, Play, Settings as SettingsIcon, X, CheckCircle2,
+  RefreshCw, Gem, Play, Settings as SettingsIcon, X, CheckCircle2, UserPlus, Copy,
 } from 'lucide-react';
 import TavernShop, { TAVERN_WEAPONS } from './TavernShop';
 import BankModal from './BankModal';
@@ -91,6 +91,9 @@ export default function MenuPage({
   const [allocatingStat, setAllocatingStat] = useState(false);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[] | null>(null);
   const [leaderboardLoading, setLeaderboardLoading] = useState(false);
+  const [referralCount, setReferralCount] = useState<number | null>(null);
+  const [referralCountLoading, setReferralCountLoading] = useState(false);
+  const [linkCopied, setLinkCopied] = useState(false);
 
   const showFlashMessage = (msg: string) => {
     setMessage(msg);
@@ -105,6 +108,16 @@ export default function MenuPage({
       .catch(err => { console.error('getLeaderboard failed:', err); setLeaderboard([]); })
       .finally(() => setLeaderboardLoading(false));
   }, [section, leaderboard]);
+
+  const profileAddr = walletAddress || playerData?.wallet_address || '';
+  React.useEffect(() => {
+    if (section !== 'profile' || !profileAddr || referralCount !== null) return;
+    setReferralCountLoading(true);
+    dbService.getReferralCount(profileAddr)
+      .then(setReferralCount)
+      .catch(err => { console.error('getReferralCount failed:', err); setReferralCount(0); })
+      .finally(() => setReferralCountLoading(false));
+  }, [section, profileAddr, referralCount]);
 
   const hasProgress = (playerData.level > 1) || ((playerData.maxUnlockedZone || 1) > 1);
 
@@ -738,6 +751,35 @@ export default function MenuPage({
                           <svg className="w-4 h-4" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4" /><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853" /><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05" /><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335" /><path d="M1 1h22v22H1z" fill="none" /></svg>
                           Log in with Google
                         </button>
+                      </div>
+                    )}
+
+                    {displayAddr && (
+                      <div className="bg-amber-950/20 border border-amber-800/40 rounded-xl p-3 flex flex-col gap-2">
+                        <div className="flex justify-between items-center">
+                          <span className="text-[10px] font-bold text-amber-500 uppercase tracking-wider flex items-center gap-1.5">
+                            <UserPlus size={12} /> Invite Friends
+                          </span>
+                          <span className="text-[9px] bg-amber-900/40 text-amber-300 border border-amber-800/50 px-1.5 py-0.5 rounded-full font-bold">
+                            {referralCountLoading ? '…' : `${referralCount ?? 0} joined`}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 bg-black/40 rounded-lg px-2 py-1.5">
+                          <span className="text-[10px] font-mono text-zinc-300 flex-1 truncate">
+                            {typeof window !== 'undefined' ? `${window.location.origin}/?ref=${displayAddr}` : ''}
+                          </span>
+                          <button
+                            onClick={() => {
+                              navigator.clipboard.writeText(`${window.location.origin}/?ref=${displayAddr}`);
+                              setLinkCopied(true);
+                              setTimeout(() => setLinkCopied(false), 2000);
+                            }}
+                            className="flex items-center gap-1 text-zinc-400 hover:text-white shrink-0 text-[9px] font-bold"
+                          >
+                            <Copy size={10} /> {linkCopied ? '✓ Copied' : 'Copy'}
+                          </button>
+                        </div>
+                        <p className="text-[9px] text-zinc-500">Share this link — friends who join and start playing count toward your invites.</p>
                       </div>
                     )}
 
