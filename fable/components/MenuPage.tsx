@@ -4,20 +4,21 @@ import React, { useState } from 'react';
 import Image from 'next/image';
 import {
   Sword, Backpack, User, BookOpen, Award, Heart, Flame,
-  RefreshCw, Gem, Play, Settings as SettingsIcon, X, CheckCircle2, UserPlus, Copy,
+  RefreshCw, Gem, Play, Settings as SettingsIcon, X, CheckCircle2, UserPlus, Copy, Users,
 } from 'lucide-react';
 import TavernShop, { TAVERN_WEAPONS } from './TavernShop';
 import BankModal from './BankModal';
 import GuidedTour, { TOUR_STEPS } from './GuidedTour';
 import NFTDetailModal from './NFTDetailModal';
 import StarterWeaponModal from './StarterWeaponModal';
+import MultiplayerLobby from './multiplayer/MultiplayerLobby';
 import { dbService, LeaderboardEntry } from '../lib/supabaseClient';
 import { avalancheService } from '../lib/avalanche';
 import { audioManager } from '../lib/audio';
 import gameBridge from '../game/systems/GameBridge';
 import { AVAX_ITEMS, STAT_POINT_FIRST_COST, STAT_POINT_COST } from '../lib/nft';
 
-type Section = 'nav' | 'tavern' | 'bank' | 'marketplace' | 'leaderboard' | 'stats' | 'profile' | 'codex' | 'loadout' | 'settings';
+type Section = 'nav' | 'tavern' | 'bank' | 'marketplace' | 'multiplayer' | 'leaderboard' | 'stats' | 'profile' | 'codex' | 'loadout' | 'settings';
 
 interface MenuPageProps {
   playerData: any;
@@ -37,6 +38,7 @@ const NAV_ITEMS: { id: Section; label: string; icon: React.ReactNode }[] = [
   { id: 'tavern',      label: 'Tavern',        icon: <span>🍺</span> },
   { id: 'bank',        label: 'Bank',          icon: <span>🏦</span> },
   { id: 'marketplace', label: 'Marketplace',   icon: <span>🛒</span> },
+  { id: 'multiplayer', label: 'Multiplayer',   icon: <Users size={14} /> },
   { id: 'leaderboard', label: 'Leaderboard',   icon: <Award size={14} /> },
   { id: 'stats',       label: 'Stats',         icon: <User size={14} /> },
   { id: 'profile',     label: 'Profile',       icon: <User size={14} /> },
@@ -46,7 +48,8 @@ const NAV_ITEMS: { id: Section; label: string; icon: React.ReactNode }[] = [
 ];
 
 // Drop preview images at /public/zones/{sceneKey}.png to populate these cards.
-const ZONE_INFO = [
+// Exported so the multiplayer lobby's zone picker can reuse the same list.
+export const ZONE_INFO = [
   {
     sceneKey: 'SunfallDunesScene', name: 'Sunfall Dunes', color: 'text-yellow-400',
     enemyName: 'Imp', enemyDesc: 'Weaker desert variant — fast but frail.',
@@ -355,6 +358,20 @@ export default function MenuPage({
                   <span className="text-sm font-bold text-zinc-300">Marketplace</span>
                   <p className="text-xs max-w-xs">Player-to-player trading is coming soon.</p>
                 </div>
+              )}
+
+              {/* MULTIPLAYER */}
+              {section === 'multiplayer' && (
+                <MultiplayerLobby
+                  playerData={playerData}
+                  setPlayerData={setPlayerData}
+                  walletAddress={walletAddress || playerData?.wallet_address || ''}
+                  walletConnected={walletConnected}
+                  connectWallet={connectWallet}
+                  fableBalance={fableBalance}
+                  refreshBalance={refreshBalance}
+                  showMessage={showFlashMessage}
+                />
               )}
 
               {/* LEADERBOARD */}

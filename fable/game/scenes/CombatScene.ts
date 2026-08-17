@@ -1,6 +1,8 @@
 import Phaser from 'phaser';
 import gameBridge from '../systems/GameBridge';
 import { audioManager } from '../../lib/audio';
+import { computePlayerDamage, computeShootCooldown, getWeaponCombatStats } from '../../lib/combatFormulas';
+import RemotePartyMember from '../systems/RemotePartyMember';
 
 export interface EnemyConfig {
   key: string;
@@ -15,20 +17,6 @@ export interface EnemyConfig {
 const WORLD_W = 1440;
 const WORLD_H = 1440;
 const TILE = 32;
-
-const WEAPON_ATK: Record<string, number> = {
-  bamboo_stick:         5,
-  iron_sword:          12,
-  ember_blade:         15,
-  obsidian_greatsword: 60,
-};
-
-const WEAPON_TEXTURE: Record<string, string> = {
-  bamboo_stick:         'player_bamboo',
-  iron_sword:           'player_iron_sword',
-  ember_blade:          'player_ember_blade',
-  obsidian_greatsword:  'player_obsidian_gs',
-};
 
 export default abstract class CombatScene extends Phaser.Scene {
   protected player!: Phaser.Types.Physics.Arcade.SpriteWithDynamicBody;
@@ -79,6 +67,36 @@ export default abstract class CombatScene extends Phaser.Scene {
   protected levelCleared = false;
   private zoneProgressSeeded = false;
 
+  // Multiplayer co-op — off by default so single-player zones are byte-for-byte unchanged.
+  // Set from the `multiplayerContext` registry value by subclasses that opt in (see
+  // MultiplayerArenaScene), read in init() so they're in place before create() uses them.
+  protected isMultiplayer = false;
+  protected maxConcurrentEnemies = 6;
+  protected enemySpawnDelay = 2000;
+  // How many times the boss must be "defeated" before the mission actually ends —
+  // 1 (default) matches existing single-player behavior exactly. Multiplayer arenas
+  // override this so the boss returns stronger each time until its final life.
+  protected bossLives = 1;
+  protected bossHpMultiplierPerPhase = 1;
+  private bossLivesRemaining = 1;
+  private bossPhaseIndex = 0;
+  private remoteMembers: Map<string, RemotePartyMember> = new Map();
+  private lastPosBroadcast = 0;
+
+  // Shared enemy state — only meaningful in multiplayer. The spawn authority (party
+  // host) runs the real spawn timers/AI and broadcasts everything; every other client
+  // mirrors enemies purely from those broadcasts, so the whole party fights the exact
+  // same swarm rather than each player's own private copy.
+  protected isSpawnAuthority = false;
+  private enemyIdCounter = 0;
+  private enemyById: Map<string, any> = new Map();
+  private resolvedEnemyIds: Set<string> = new Set();
+  private lastEnemySnapshotBroadcast = 0;
+  // Kills THIS client personally landed (as opposed to enemiesDefeated, which in
+  // multiplayer is the host's shared party-wide count used to gate the boss spawn) —
+  // feeds the mission-results screen's per-player kill stat.
+  private personalKills = 0;
+
   // Leaderboard score — sum of every enemy's point value killed this run
   // (imps + boss). Resets each time the scene (re)starts, so replays score fresh.
   protected runScore = 0;
@@ -101,6 +119,14 @@ export default abstract class CombatScene extends Phaser.Scene {
     this.levelCleared = false;
     this.playerDead = false;
     this.runScore = 0;
+    this.bossLivesRemaining = this.bossLives;
+    this.bossPhaseIndex = 0;
+    this.remoteMembers.forEach(rm => rm.destroy());
+    this.remoteMembers.clear();
+    this.enemyIdCounter = 0;
+    this.enemyById.clear();
+    this.resolvedEnemyIds.clear();
+    this.personalKills = 0;
   }
 
   create() {
@@ -119,15 +145,14 @@ export default abstract class CombatScene extends Phaser.Scene {
         const str = data.stats?.strength || 0;
         const agi = data.stats?.agility || 0;
         const def = data.stats?.defense || 0;
-        const weaponAtk = WEAPON_ATK[data.equippedWeapon ?? 'bamboo_stick'] ?? 5;
-        this.equippedWeaponAtk = weaponAtk;
-        this.playerDmg = 32 + (str * 2) + weaponAtk;
+        const weapon = getWeaponCombatStats(data.equippedWeapon ?? 'bamboo_stick');
+        this.equippedWeaponAtk = weapon.attack;
+        this.playerDmg = computePlayerDamage(str, data.equippedWeapon ?? 'bamboo_stick');
         this.playerDefense = def;
-        this.shootCooldown = Math.max(150, 600 - (agi * 30));
+        this.shootCooldown = computeShootCooldown(agi);
         this.activeAbility = data.activeAbility ?? null;
         // Apply equipped weapon texture on load
-        const textureKey = WEAPON_TEXTURE[data.equippedWeapon ?? 'bamboo_stick'] ?? 'player_bamboo';
-        if (this.player?.active) this.player.setTexture(textureKey);
+        if (this.player?.active) this.player.setTexture(weapon.textureKey);
 
         // Seed mid-zone kill/score progress once, from the player's last save
         if (!this.zoneProgressSeeded) {
@@ -165,7 +190,7 @@ export default abstract class CombatScene extends Phaser.Scene {
 
     // Enemy spawn timer
     this.time.addEvent({
-      delay: 2000,
+      delay: this.enemySpawnDelay,
       callback: this.spawnRegularEnemy,
       callbackScope: this,
       loop: true,
@@ -213,9 +238,139 @@ export default abstract class CombatScene extends Phaser.Scene {
     // otherwise sit frozen underneath forever. Restart the scene to match
     // handleQuit's zoneProgress reset — next visit starts this zone fresh.
     const unsubQuit = gameBridge.on('quit_run', () => { this.scene.restart(); });
+
+    // ── Multiplayer: remote party members + shared boss-phase transitions ─────
+    // Only wired when a subclass has actually opted into multiplayer (see
+    // MultiplayerArenaScene) — single-player scenes never emit/receive these.
+    const unsubPartyData = gameBridge.on('sync_party_member_data', ({ wallet, data }: any) => {
+      if (!this.isMultiplayer || !data) return;
+      const existing = this.remoteMembers.get(wallet);
+      if (existing) { existing.updateGear(data.equippedWeapon); return; }
+      const rm = new RemotePartyMember(this, wallet, data.name ?? 'Ally', data.equippedWeapon ?? 'bamboo_stick', this.player.x, this.player.y);
+      this.remoteMembers.set(wallet, rm);
+    });
+    const unsubRemotePos = gameBridge.on('mp_in_pos', (payload: any) => {
+      const rm = this.remoteMembers.get(payload.wallet);
+      if (rm) rm.receivePos(payload.x, payload.y, payload.flipX);
+    });
+    // Boss-phase transitions are decided by whichever client's own hit brings its local
+    // boss copy to 0 HP first (see resolveBossPhaseDefeat) — the phase-number guard here
+    // makes duplicate/late broadcasts from other clients a no-op.
+    const unsubBossPhase = gameBridge.on('mp_boss_phase_defeat', (data: any) => {
+      if (!this.isMultiplayer || data?.phase !== this.bossPhaseIndex) return;
+      this.resolveBossPhaseDefeat(true); // a teammate landed this blow, not us — no score/XP here
+    });
+
+    // ── Multiplayer: mirrored (non-authority) enemy state ──────────────────────
+    // Everything below is only ever received on non-host clients — the host never
+    // subscribes to its own broadcasts, so there's no risk of it double-applying them.
+    const unsubEnemySpawn = gameBridge.on('mp_in_enemy_spawn', (data: any) => {
+      if (!this.isMultiplayer || this.isSpawnAuthority || this.enemyById.has(data.id)) return;
+      const config = data.isBoss ? this.bossConfig : this.regularEnemyConfig;
+      const enemy = this.spawnEnemySprite(config, data.x, data.y, data.isBoss, data.id, data.hp);
+      if (data.isBoss) {
+        this.bossInstance = enemy;
+        this.bossSpawned = true;
+        if (this.bossHpBar) this.bossHpBar.destroy();
+        this.bossHpBar = this.add.graphics().setDepth(14);
+      }
+    });
+    const unsubEnemySnapshot = gameBridge.on('mp_in_enemy_snapshot', (snapshot: any[]) => {
+      if (!this.isMultiplayer || this.isSpawnAuthority) return;
+      snapshot.forEach(s => {
+        const enemy = this.enemyById.get(s.id);
+        if (!enemy?.active) return;
+        enemy.x += (s.x - enemy.x) * 0.35;
+        enemy.y += (s.y - enemy.y) * 0.35;
+        enemy.setFlipX(s.flipX);
+      });
+    });
+    const unsubEnemyDamage = gameBridge.on('mp_in_enemy_damage', (data: any) => {
+      if (!this.isMultiplayer) return;
+      const enemy = this.enemyById.get(data.id);
+      if (!enemy?.active) return;
+      const hp = (enemy.getData('hp') ?? 0) - data.dmg;
+      enemy.setData('hp', hp);
+      enemy.setTint(0xFFFFFF);
+      this.time.delayedCall(80, () => { if (enemy?.active) enemy.clearTint(); });
+      // Boss "death" is decided by the dedicated phase-defeat broadcast, not by HP
+      // crossing zero here — this keeps its HP bar in sync without double-resolving.
+      if (hp <= 0 && !enemy.isBoss) this.defeatEnemy(enemy, true);
+    });
+    const unsubEnemyRemoved = gameBridge.on('mp_in_enemy_removed', (data: any) => {
+      if (!this.isMultiplayer) return;
+      const enemy = this.enemyById.get(data.id);
+      if (enemy) this.defeatEnemy(enemy, true);
+    });
+    const unsubEnemyShot = gameBridge.on('mp_in_enemy_shot', (data: any) => {
+      if (!this.isMultiplayer || this.isSpawnAuthority) return;
+      const proj = this.enemyProjectiles.create(data.x, data.y, 'enemy_projectile');
+      proj.setVelocity(data.vx, data.vy);
+      proj.setDepth(7);
+      this.time.delayedCall(data.life ?? 2000, () => { if (proj?.active) proj.destroy(); });
+    });
+
+    // ── Multiplayer: reconnect / host migration (see NetworkBridge for the Presence
+    // side of this — it decides WHO should be authority, this just reacts to that). ──
+    const unsubRoleChanged = gameBridge.on('mp_local_role_changed', (data: { isHost: boolean }) => {
+      if (!this.isMultiplayer || data.isHost === this.isSpawnAuthority) return;
+      this.isSpawnAuthority = data.isHost;
+      if (this.isSpawnAuthority) {
+        // Just took over (host disconnected, we're the earliest joiner left). The
+        // gated spawn timer/AI loop starts firing again on its own next tick — the
+        // one thing worth doing explicitly is re-announcing everything we already
+        // have tracked, so anyone who joins after this point (or is still catching
+        // up) gets it without waiting on the next natural spawn/snapshot cycle.
+        this.enemies.getChildren().forEach((enemy: any) => {
+          const netId = enemy.getData('netId');
+          if (!netId || !enemy.active) return;
+          gameBridge.emit('mp_out_enemy_spawn', {
+            id: netId, isBoss: !!enemy.isBoss, x: enemy.x, y: enemy.y, hp: enemy.getData('hp'),
+          });
+        });
+      }
+    });
+    // Answer a catch-up request from a client that just (re)joined mid-mission — only
+    // the current authority actually has anything meaningful to report.
+    const unsubRequestState = gameBridge.on('mp_in_request_state', () => {
+      if (!this.isMultiplayer || !this.isSpawnAuthority) return;
+      const enemies = this.enemies.getChildren()
+        .filter((e: any) => e.active && e.getData('netId'))
+        .map((e: any) => ({ id: e.getData('netId'), isBoss: !!e.isBoss, x: e.x, y: e.y, hp: e.getData('hp') }));
+      gameBridge.emit('mp_out_state_snapshot', { enemies, bossPhaseIndex: this.bossPhaseIndex });
+    });
+    const unsubStateSnapshot = gameBridge.on('mp_in_state_snapshot', (data: { enemies: any[]; bossPhaseIndex?: number }) => {
+      if (!this.isMultiplayer || this.isSpawnAuthority) return;
+      // Catch our own phase counter up to reality — otherwise the phase-number guard
+      // on mp_boss_phase_defeat would never match again for a client that joined mid-fight.
+      if (typeof data.bossPhaseIndex === 'number' && data.bossPhaseIndex > this.bossPhaseIndex) {
+        this.bossPhaseIndex = data.bossPhaseIndex;
+        this.bossLivesRemaining = this.bossLives - this.bossPhaseIndex;
+      }
+      data.enemies?.forEach(e => {
+        if (this.enemyById.has(e.id)) return; // already have it, e.g. from a spawn broadcast that beat this response
+        const config = e.isBoss ? this.bossConfig : this.regularEnemyConfig;
+        const enemy = this.spawnEnemySprite(config, e.x, e.y, e.isBoss, e.id, e.hp);
+        if (e.isBoss) {
+          this.bossInstance = enemy;
+          this.bossSpawned = true;
+          if (this.bossHpBar) this.bossHpBar.destroy();
+          this.bossHpBar = this.add.graphics().setDepth(14);
+        }
+      });
+    });
+    const unsubMemberLeft = gameBridge.on('mp_member_left', (data: { wallet: string }) => {
+      this.remoteMembers.get(data.wallet)?.markDisconnected();
+    });
+
     this.events.on('destroy', () => {
       unsubL(); unsubR(); unsubA(); unsubSI(); unsubNext(); unsubW();
       unsubPause(); unsubResume(); unsubContinue(); unsubQuit();
+      unsubPartyData(); unsubRemotePos(); unsubBossPhase();
+      unsubEnemySpawn(); unsubEnemySnapshot(); unsubEnemyDamage(); unsubEnemyRemoved(); unsubEnemyShot();
+      unsubRoleChanged(); unsubRequestState(); unsubStateSnapshot(); unsubMemberLeft();
+      this.remoteMembers.forEach(rm => rm.destroy());
+      this.remoteMembers.clear();
     });
 
     // Player HP label (world-space, updated per frame)
@@ -309,12 +464,15 @@ export default abstract class CombatScene extends Phaser.Scene {
       this.lastShootTime = time;
     }
 
-    // ── Enemy AI ──────────────────────────────────────────────────────────────
-    this.enemies.getChildren().forEach((enemy: any) => {
-      if (!enemy.active) return;
-      if (enemy.isBoss) this.runBossAI(enemy, time);
-      else this.runRegularEnemyAI(enemy, time);
-    });
+    // ── Enemy AI — only the spawn authority (host) drives it; everyone else's
+    //    enemies are positioned purely from mp_in_enemy_snapshot below ──────────
+    if (!this.isMultiplayer || this.isSpawnAuthority) {
+      this.enemies.getChildren().forEach((enemy: any) => {
+        if (!enemy.active) return;
+        if (enemy.isBoss) this.runBossAI(enemy, time);
+        else this.runRegularEnemyAI(enemy, time);
+      });
+    }
 
     if (this.shieldCircle) {
       this.shieldCircle.setPosition(this.player.x, this.player.y);
@@ -328,6 +486,24 @@ export default abstract class CombatScene extends Phaser.Scene {
     // ── Player HP label ───────────────────────────────────────────────────────
     this.playerHPLabel.setPosition(this.player.x, this.player.y - 20);
     this.playerHPLabel.setText(`♥ ${this.playerHP}`);
+
+    // ── Multiplayer: interpolate remote party members, broadcast our own position ──
+    if (this.isMultiplayer) {
+      this.remoteMembers.forEach(rm => rm.tick());
+      if (time - this.lastPosBroadcast > 100) {
+        this.lastPosBroadcast = time;
+        gameBridge.emit('mp_out_pos', { x: this.player.x, y: this.player.y, flipX: this.player.flipX });
+      }
+      // Host also broadcasts where every enemy actually is, so mirrored copies on
+      // other clients track the real fight instead of drifting from independent AI.
+      if (this.isSpawnAuthority && time - this.lastEnemySnapshotBroadcast > 150) {
+        this.lastEnemySnapshotBroadcast = time;
+        const snapshot = this.enemies.getChildren()
+          .filter((e: any) => e.active && e.getData('netId'))
+          .map((e: any) => ({ id: e.getData('netId'), x: e.x, y: e.y, flipX: e.flipX }));
+        if (snapshot.length) gameBridge.emit('mp_out_enemy_snapshot', snapshot);
+      }
+    }
 
     // ── Enemy HP mini-bars ────────────────────────────────────────────────────
     this.enemyHPGraphics.clear();
@@ -446,9 +622,33 @@ export default abstract class CombatScene extends Phaser.Scene {
     });
   }
 
+  // Creates a physics-enabled enemy sprite and (in multiplayer) registers it under a
+  // shared network id so damage/position/removal broadcasts can find it again. Used
+  // both by the spawn authority (real spawns) and by mirroring clients (spawns
+  // replayed from mp_in_enemy_spawn) — the two paths must produce identical state.
+  private spawnEnemySprite(config: EnemyConfig, x: number, y: number, isBoss: boolean, netId: string, hp?: number): any {
+    const enemy = this.enemies.create(x, y, config.key) as any;
+    enemy.setCollideWorldBounds(true);
+    enemy.setDepth(5);
+    if (isBoss) enemy.isBoss = true;
+    const useHp = hp ?? config.hp;
+    enemy.setData('hp', useHp);
+    enemy.setData('maxHp', useHp);
+    enemy.setData('damage', config.damage);
+    enemy.setData('points', config.points);
+    enemy.setData('lastShot', 0);
+    enemy.setData('lastMeleeDmg', 0);
+    if (netId) {
+      enemy.setData('netId', netId);
+      this.enemyById.set(netId, enemy);
+    }
+    return enemy;
+  }
+
   private spawnRegularEnemy() {
+    if (this.isMultiplayer && !this.isSpawnAuthority) return; // mirrored clients never self-spawn
     if (!this.player?.active || this.playerHP <= 0 || this.bossSpawned || this.levelCleared) return;
-    if (this.enemies.getLength() >= 6) return;
+    if (this.enemies.getLength() >= this.maxConcurrentEnemies) return;
 
     // Spawn within world bounds but not too close to player
     let rx = 0, ry = 0;
@@ -462,34 +662,31 @@ export default abstract class CombatScene extends Phaser.Scene {
       attempts < 10
     );
 
-    const enemy = this.enemies.create(rx, ry, this.regularEnemyConfig.key) as any;
-    enemy.setCollideWorldBounds(true);
-    enemy.setDepth(5);
-    enemy.setData('hp', this.regularEnemyConfig.hp);
-    enemy.setData('maxHp', this.regularEnemyConfig.hp);
-    enemy.setData('damage', this.regularEnemyConfig.damage);
-    enemy.setData('points', this.regularEnemyConfig.points);
-    enemy.setData('lastShot', 0);
-    enemy.setData('lastMeleeDmg', 0);
+    const netId = this.isMultiplayer ? `e${++this.enemyIdCounter}` : '';
+    this.spawnEnemySprite(this.regularEnemyConfig, rx, ry, false, netId);
+    if (this.isMultiplayer) {
+      gameBridge.emit('mp_out_enemy_spawn', { id: netId, isBoss: false, x: rx, y: ry, hp: this.regularEnemyConfig.hp });
+    }
   }
 
   private spawnBoss() {
     if (this.bossSpawned) return;
+    if (this.isMultiplayer && !this.isSpawnAuthority) return; // only the host actually summons it
     this.bossSpawned = true;
 
     // Boss spawns in the upper half of the world, center-right
     const bossX = WORLD_W * 0.65;
     const bossY = WORLD_H * 0.25;
-    const boss = this.enemies.create(bossX, bossY, this.bossConfig.key) as any;
-    boss.setCollideWorldBounds(true);
-    boss.isBoss = true;
-    boss.setDepth(5);
-    boss.setData('hp', this.bossConfig.hp);
-    boss.setData('maxHp', this.bossConfig.hp);
-    boss.setData('damage', this.bossConfig.damage);
-    boss.setData('points', this.bossConfig.points);
-    boss.setData('lastShot', 0);
-    this.bossInstance = boss;
+    // Each returning life comes back tougher (bossHpMultiplierPerPhase === 1 outside
+    // multiplayer, so single-player HP is unaffected).
+    const scaledHp = Math.round(this.bossConfig.hp * Math.pow(this.bossHpMultiplierPerPhase, this.bossPhaseIndex));
+    // A fresh id per phase — the previous phase's id is already gone from enemyById
+    // (see resolveBossPhaseDefeat), so this can't collide with a stale entry.
+    const netId = this.isMultiplayer ? `boss${this.bossPhaseIndex}` : '';
+    this.bossInstance = this.spawnEnemySprite(this.bossConfig, bossX, bossY, true, netId, scaledHp);
+    if (this.isMultiplayer) {
+      gameBridge.emit('mp_out_enemy_spawn', { id: netId, isBoss: true, x: bossX, y: bossY, hp: scaledHp });
+    }
 
     this.bossHpBar = this.add.graphics().setDepth(14);
     this.cameras.main.flash(500, 200, 0, 0);
@@ -536,12 +733,22 @@ export default abstract class CombatScene extends Phaser.Scene {
     // Ranged attack when close enough
     const lastShot = enemy.getData('lastShot') || 0;
     if (time > lastShot + 2200 && dist < 200) {
-      const proj = this.enemyProjectiles.create(enemy.x, enemy.y, 'enemy_projectile');
-      proj.setVelocity(Math.cos(angle) * 160, Math.sin(angle) * 160);
-      proj.setDepth(7);
-      this.time.delayedCall(2000, () => { if (proj?.active) proj.destroy(); });
+      this.fireEnemyProjectile(enemy.x, enemy.y, Math.cos(angle) * 160, Math.sin(angle) * 160);
       enemy.setData('lastShot', time);
     }
+  }
+
+  // Creates an enemy projectile locally and — in multiplayer — broadcasts it so every
+  // other client's own player is actually at risk from it too, not just the host's.
+  private fireEnemyProjectile(x: number, y: number, vx: number, vy: number, life = 2000) {
+    const proj = this.enemyProjectiles.create(x, y, 'enemy_projectile');
+    proj.setVelocity(vx, vy);
+    proj.setDepth(7);
+    this.time.delayedCall(life, () => { if (proj?.active) proj.destroy(); });
+    if (this.isMultiplayer && this.isSpawnAuthority) {
+      gameBridge.emit('mp_out_enemy_shot', { x, y, vx, vy, life });
+    }
+    return proj;
   }
 
   private runBossAI(boss: any, time: number) {
@@ -562,10 +769,7 @@ export default abstract class CombatScene extends Phaser.Scene {
           ? angle + (i - (numProj - 1) / 2) * 0.3
           : (i / numProj) * Math.PI * 2;
 
-        const proj = this.enemyProjectiles.create(boss.x, boss.y, 'enemy_projectile');
-        proj.setVelocity(Math.cos(a) * 200, Math.sin(a) * 200);
-        proj.setDepth(7);
-        this.time.delayedCall(2500, () => { if (proj?.active) proj.destroy(); });
+        this.fireEnemyProjectile(boss.x, boss.y, Math.cos(a) * 200, Math.sin(a) * 200, 2500);
       }
 
       if (this.bossConfig.key === 'fire_demon' && Math.random() < 0.4) {
@@ -631,46 +835,120 @@ export default abstract class CombatScene extends Phaser.Scene {
     enemy.setTint(0xFFFFFF);
     this.time.delayedCall(80, () => { if (enemy?.active) enemy.clearTint(); });
 
-    if (hp <= 0) this.defeatEnemy(enemy);
-  }
-
-  private defeatEnemy(enemy: any) {
-    const isBoss = enemy.isBoss;
-    const points = enemy.getData('points') || 10;
-    this.runScore += points;
-
-    if (isBoss || Math.random() < 0.25) {
-      const lootKey = enemy.texture.key === 'poison_slime' ? 'scorpion' : 'fire_item';
-      const loot = this.lootItems.create(enemy.x, enemy.y, 'coin') as any;
-      loot.setTint(enemy.texture.key === 'poison_slime' ? 0x8AE234 : 0xEF2929);
-      loot.setData('itemKey', lootKey);
-      loot.setVelocity(Phaser.Math.Between(-40, 40), Phaser.Math.Between(-40, 40));
-      loot.setDrag(80);
-      loot.setDepth(4);
+    const netId = enemy.getData('netId');
+    if (this.isMultiplayer && netId) {
+      gameBridge.emit('mp_out_enemy_damage', { id: netId, dmg });
     }
 
-    const xpGain = points * 2;
-    audioManager.playSfx(isBoss ? 'bossDie' : 'enemyDie');
-    this.showFloatingText(enemy.x, enemy.y - 28, `+${xpGain} XP`, '#8AE234');
-    gameBridge.emit('player_xp_gained', xpGain);
-    enemy.destroy();
+    if (hp <= 0) {
+      if (enemy.isBoss) {
+        // In multiplayer, tell the rest of the party this phase is over (guarded by
+        // phase number on the receiving end so duplicate/late broadcasts are ignored)
+        // — then resolve locally right away so the player who landed the blow isn't
+        // waiting on a network round-trip to see the result.
+        if (this.isMultiplayer) {
+          gameBridge.emit('mp_out_boss_phase_defeat', { phase: this.bossPhaseIndex });
+        }
+        this.resolveBossPhaseDefeat(false);
+      } else {
+        this.defeatEnemy(enemy);
+      }
+    }
+  }
 
-    if (isBoss) {
-      if (this.bossHpBar) this.bossHpBar.destroy();
+  // fromNetwork=true means another client already resolved this kill and we're just
+  // being told to remove our mirrored copy — no XP/loot/score is (re-)awarded, since
+  // that already happened once, on whichever client's own damage crossed zero first.
+  private defeatEnemy(enemy: any, fromNetwork = false) {
+    const netId = enemy.getData('netId');
+    if (netId) {
+      if (this.resolvedEnemyIds.has(netId)) { if (enemy.active) enemy.destroy(); return; }
+      this.resolvedEnemyIds.add(netId);
+    }
+
+    const points = enemy.getData('points') || 10;
+
+    if (!fromNetwork) {
+      this.runScore += points;
+      this.personalKills++;
+      if (Math.random() < 0.25) {
+        const lootKey = enemy.texture.key === 'poison_slime' ? 'scorpion' : 'fire_item';
+        const loot = this.lootItems.create(enemy.x, enemy.y, 'coin') as any;
+        loot.setTint(enemy.texture.key === 'poison_slime' ? 0x8AE234 : 0xEF2929);
+        loot.setData('itemKey', lootKey);
+        loot.setVelocity(Phaser.Math.Between(-40, 40), Phaser.Math.Between(-40, 40));
+        loot.setDrag(80);
+        loot.setDepth(4);
+      }
+
+      const xpGain = points * 2;
+      audioManager.playSfx('enemyDie');
+      this.showFloatingText(enemy.x, enemy.y - 28, `+${xpGain} XP`, '#8AE234');
+      gameBridge.emit('player_xp_gained', xpGain);
+
+      if (this.isMultiplayer && netId) {
+        gameBridge.emit('mp_out_enemy_removed', { id: netId });
+      }
+    }
+
+    if (netId) this.enemyById.delete(netId);
+    if (enemy.active) enemy.destroy();
+
+    // Shared kill count: increments once per enemy regardless of who actually landed
+    // the blow, so the boss-spawn threshold reflects the whole party's progress, not
+    // just whichever client happens to be resolving this call.
+    if (!this.isMultiplayer || !fromNetwork || this.isSpawnAuthority) {
+      this.enemiesDefeated++;
+    }
+    gameBridge.emit('zone_progress_updated', { zone: this.scene.key, enemiesDefeated: this.enemiesDefeated, runScore: this.runScore });
+
+    if (this.enemiesDefeated >= this.requiredDefeatsToBoss && !this.bossSpawned && (!this.isMultiplayer || this.isSpawnAuthority)) {
+      this.spawnBoss();
+    }
+  }
+
+  // Handles both the single-player case (bossLives === 1, so this always takes the
+  // "final" branch — identical to the old inline behavior) and the multiplayer case
+  // where the boss returns for additional lives before the mission actually ends.
+  // fromNetwork=false means OUR damage brought this boss life to 0 — we get the
+  // score/XP/kill credit for it, same rule the regular-enemy path uses. fromNetwork=true
+  // means a teammate's blow did it and we're just following the shared transition.
+  private resolveBossPhaseDefeat(fromNetwork: boolean) {
+    if (!this.bossInstance) return; // already resolved (e.g. a duplicate broadcast)
+    const { x, y } = this.bossInstance;
+    const points = this.bossInstance.getData('points') || this.bossConfig.points;
+    const oldNetId = this.bossInstance.getData('netId');
+    if (oldNetId) this.enemyById.delete(oldNetId);
+    if (this.bossHpBar) { this.bossHpBar.destroy(); this.bossHpBar = null; }
+    if (this.bossInstance.active) this.bossInstance.destroy();
+    this.bossInstance = null;
+    this.bossLivesRemaining--;
+    this.bossPhaseIndex++;
+    audioManager.playSfx('bossDie');
+
+    if (!fromNetwork) {
+      this.runScore += points;
+      this.personalKills++;
+      const xpGain = points * 2;
+      this.showFloatingText(x, y - 56, `+${xpGain} XP`, '#8AE234');
+      gameBridge.emit('player_xp_gained', xpGain);
+    }
+
+    if (this.bossLivesRemaining > 0) {
+      this.bossSpawned = false;
+      this.showFloatingText(x, y - 40, `${this.bossLivesRemaining} ${this.bossLivesRemaining === 1 ? 'LIFE' : 'LIVES'} LEFT!`, '#FFD700');
+      this.cameras.main.flash(400, 200, 100, 255);
+      this.time.delayedCall(3500, () => { if (!this.levelCleared) this.spawnBoss(); });
+    } else {
       this.levelCleared = true;
       this.player.setVelocity(0);
       audioManager.playSfx('zoneClear');
       audioManager.stopMusic();
-      gameBridge.emit('zone_cleared', { zone: this.scene.key, score: this.runScore });
-
-      // Victory flash
+      gameBridge.emit(
+        this.isMultiplayer ? 'mp_mission_cleared' : 'zone_cleared',
+        { zone: this.scene.key, score: this.runScore, kills: this.personalKills },
+      );
       this.cameras.main.flash(800, 255, 220, 0);
-    } else {
-      this.enemiesDefeated++;
-      gameBridge.emit('zone_progress_updated', { zone: this.scene.key, enemiesDefeated: this.enemiesDefeated, runScore: this.runScore });
-      if (this.enemiesDefeated >= this.requiredDefeatsToBoss && !this.bossSpawned) {
-        this.spawnBoss();
-      }
     }
   }
 

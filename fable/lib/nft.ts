@@ -112,19 +112,29 @@ export const FABLE_LEADERBOARD_ABI = parseAbi([
 
 // Zone scene name → level ID (used for on-chain reward/entry-fee tracking)
 export const ZONE_LEVEL_IDS: Record<string, number> = {
-  EmberFieldsScene:   1,
-  AshwaterMarshScene: 2,
-  ObsidianPeakScene:  3,
-  SunfallDunesScene:  4,
+  EmberFieldsScene:      1,
+  AshwaterMarshScene:    2,
+  ObsidianPeakScene:     3,
+  SunfallDunesScene:     4,
+  // The co-op arena — reuses the exact same clearZone/attest-zone-clear flow as every
+  // single-player zone (same contract, same route, no changes needed to either); just
+  // a new zoneId. Requires the contract admin to call
+  // FableGameSession.setZoneReward(5, <amount>) once before this actually mints —
+  // until then clearZone still succeeds and posts the score, it just mints 0 FABLE
+  // (same as any zone with no reward configured).
+  MultiplayerArenaScene: 5,
 };
 
 // FABLE reward per level, in play order (Sunfall → Ember → Ashwater →
 // Obsidian): 300, 500, 700, 900 — +200 per level.
 export const ZONE_LEVEL_REWARDS: Record<string, number> = {
-  SunfallDunesScene:  300,
-  EmberFieldsScene:   500,
-  AshwaterMarshScene: 700,
-  ObsidianPeakScene:  900,
+  SunfallDunesScene:     300,
+  EmberFieldsScene:      500,
+  AshwaterMarshScene:    700,
+  ObsidianPeakScene:     900,
+  // Mirrors zoneId 5's on-chain FableGameSession.zoneRewards value once the admin
+  // configures it — see the ZONE_LEVEL_IDS comment above. Keep these two in sync.
+  MultiplayerArenaScene: 400,
 };
 
 // Flat FABLE entry fee, every zone — must match FableGameSession.zoneCosts

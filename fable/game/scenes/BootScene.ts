@@ -471,6 +471,116 @@ export default class BootScene extends Phaser.Scene {
       g.fillRect(28, 38, 24, 3);
     });
 
+    // ─── VOID IMP (24×32) ─── Co-op arena enemy — spectral violet raider, distinct from the ember imp ───
+    draw('void_imp', 24, 32, (g) => {
+      // Wings (dark violet, wispy)
+      g.fillStyle(0x1A0A3A);
+      g.fillTriangle(0, 6, 6, 2, 6, 18);
+      g.fillTriangle(24, 6, 18, 2, 18, 18);
+      g.fillStyle(0x3A1A6E);
+      g.fillTriangle(0, 8, 5, 4, 5, 16);
+      g.fillTriangle(24, 8, 19, 4, 19, 16);
+
+      // Body
+      g.fillStyle(0x4B1E8C);
+      g.fillRect(5, 8, 14, 18);
+      g.fillStyle(0x6E33B8);
+      g.fillRect(7, 10, 10, 10);
+
+      // Head
+      g.fillStyle(0x4B1E8C);
+      g.fillRect(6, 2, 12, 10);
+
+      // Horns
+      g.fillStyle(0x220A44);
+      g.fillRect(6, 0, 3, 3);
+      g.fillRect(15, 0, 3, 3);
+
+      // Glowing violet eyes
+      g.fillStyle(0xCC66FF);
+      g.fillRect(8, 5, 3, 3);
+      g.fillRect(13, 5, 3, 3);
+      g.fillStyle(0xEEBBFF);
+      g.fillRect(9, 6, 1, 1);
+      g.fillRect(14, 6, 1, 1);
+
+      // Legs
+      g.fillStyle(0x3A1670);
+      g.fillRect(6, 26, 5, 6);
+      g.fillRect(13, 26, 5, 6);
+
+      // Claws
+      g.fillStyle(0x222222);
+      g.fillRect(5, 31, 3, 1);
+      g.fillRect(13, 31, 3, 1);
+    });
+
+    // ─── VOID TITAN BOSS (96×96) ─── Co-op arena boss — colossal rift guardian that returns
+    // across multiple lives before its core finally shatters ───
+    draw('void_titan', 96, 96, (g) => {
+      // Outer aura
+      g.fillStyle(0x2A0A55, 0.5);
+      g.fillCircle(48, 48, 46);
+      g.fillStyle(0x3A1470, 0.4);
+      g.fillCircle(48, 48, 38);
+
+      // Armored body
+      g.fillStyle(0x160830);
+      g.fillRect(20, 20, 56, 64);
+      g.fillStyle(0x241048);
+      g.fillRect(26, 26, 44, 52);
+
+      // Chest core (pulses via tint at runtime)
+      g.fillStyle(0x9B4DFF);
+      g.fillCircle(48, 52, 12);
+      g.fillStyle(0xD9B3FF);
+      g.fillCircle(48, 52, 5);
+
+      // Shoulders
+      g.fillStyle(0x100620);
+      g.fillRect(6, 22, 18, 22);
+      g.fillRect(72, 22, 18, 22);
+
+      // Horned crown
+      g.fillStyle(0x160830);
+      g.fillTriangle(30, 20, 22, 0, 40, 20);
+      g.fillTriangle(66, 20, 74, 0, 56, 20);
+      g.fillTriangle(48, 16, 40, -4, 56, -4);
+
+      // Eyes
+      g.fillStyle(0xFF66FF);
+      g.fillRect(34, 30, 8, 6);
+      g.fillRect(54, 30, 8, 6);
+      g.fillStyle(0xFFE0FF);
+      g.fillRect(36, 31, 3, 3);
+      g.fillRect(56, 31, 3, 3);
+
+      // Legs
+      g.fillStyle(0x100620);
+      g.fillRect(26, 78, 16, 16);
+      g.fillRect(54, 78, 16, 16);
+    });
+
+    // ─── VOID RIFT GROUND (32×32) ─── Co-op arena tile — cracked dark stone with violet energy veins ───
+    draw('tile_void', 32, 32, (g) => {
+      g.fillStyle(0x0B0714);
+      g.fillRect(0, 0, 32, 32);
+      g.fillStyle(0x140C24);
+      g.fillRect(2, 2, 28, 28);
+      // Cracks
+      g.fillStyle(0x08050F);
+      g.fillRect(4, 14, 20, 1);
+      g.fillRect(14, 4, 1, 22);
+      g.fillRect(20, 18, 8, 1);
+      // Violet energy veins
+      g.fillStyle(0x8A3AE0);
+      g.fillRect(5, 14, 10, 1);
+      g.fillRect(14, 6, 1, 8);
+      g.fillStyle(0xB878FF);
+      g.fillRect(6, 14, 4, 1);
+      g.fillRect(14, 7, 1, 3);
+    });
+
     // ─── CHICKEN (16×14) ───
     draw('chicken', 16, 14, (g) => {
       g.fillStyle(0xEEEEEE);

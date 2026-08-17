@@ -200,3 +200,9 @@ CREATE TABLE IF NOT EXISTS public.campaign_payouts (
 ALTER TABLE public.campaign_payouts ENABLE ROW LEVEL SECURITY;
 
 CREATE INDEX IF NOT EXISTS idx_campaign_payouts_campaign  ON public.campaign_payouts (campaign_id);
+
+
+-- ── 6. MULTIPLAYER ───────────────────────────────────────────────────────────
+-- Co-op lobby/party/mission tables have moved to their own file:
+-- supabase_schema_multiplayer.sql — run it after this one (it depends on
+-- public.players and the set_updated_at() trigger function defined above).
