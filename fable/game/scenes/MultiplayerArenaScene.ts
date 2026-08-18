@@ -1,4 +1,8 @@
+import Phaser from 'phaser';
 import CombatScene, { EnemyConfig } from './CombatScene';
+
+const WORLD_W = 1440;
+const WORLD_H = 1440;
 
 // The one dedicated co-op mission — deliberately a different world from every
 // single-player zone, not a reuse of them: its own enemy (Void Imp), its own boss
@@ -55,16 +59,55 @@ export default class MultiplayerArenaScene extends CombatScene {
   }
 
   protected createBiomeLayout(): void {
+    const spawn = { x: WORLD_W / 2, y: WORLD_H - 200 };
+    const farFromSpawn = (x: number, y: number) => Phaser.Math.Distance.Between(x, y, spawn.x, spawn.y) > 220;
+
     // Obsidian rock clusters tinted violet to match the rift theme — reuses the
     // existing rock textures (no new art needed) rather than duplicating geometry.
     const rockPositions = [
       { x: 200, y: 260 }, { x: 1200, y: 300 }, { x: 300, y: 1100 },
       { x: 1150, y: 1050 }, { x: 720, y: 190 }, { x: 720, y: 1250 },
-      { x: 90, y: 720 }, { x: 1350, y: 720 },
+      { x: 90, y: 720 }, { x: 1350, y: 720 }, { x: 480, y: 480 },
+      { x: 960, y: 480 }, { x: 480, y: 960 }, { x: 960, y: 960 },
     ];
     rockPositions.forEach(({ x, y }) => {
       this.add.image(x, y, 'rock_large').setTint(0x5533AA).setDepth(4);
       this.add.image(x + 18, y + 16, 'rock_medium').setTint(0x7744CC).setDepth(4);
     });
+
+    // Rift crystal spikes — the arena's signature scenery piece, scattered widely so
+    // the world reads as a real place rather than an empty tiled floor.
+    for (let i = 0; i < 16; i++) {
+      const x = Phaser.Math.Between(80, WORLD_W - 80);
+      const y = Phaser.Math.Between(80, WORLD_H - 80);
+      if (!farFromSpawn(x, y)) continue;
+      this.add.image(x, y, 'rift_crystal')
+        .setOrigin(0.5, 1)
+        .setScale(Phaser.Math.FloatBetween(0.7, 1.4))
+        .setDepth(4);
+    }
+
+    // Small glowing shard debris scattered across the ground — cheap, high-coverage
+    // detail that reads immediately even at a glance, unlike a handful of big props.
+    for (let i = 0; i < 45; i++) {
+      const x = Phaser.Math.Between(40, WORLD_W - 40);
+      const y = Phaser.Math.Between(40, WORLD_H - 40);
+      this.add.image(x, y, 'rift_shard')
+        .setAlpha(Phaser.Math.FloatBetween(0.4, 0.9))
+        .setScale(Phaser.Math.FloatBetween(0.6, 1.1))
+        .setDepth(3);
+    }
+
+    // Faint tinted ground-texture patches — same trick SunfallDunesScene uses for its
+    // dune ripples, breaks up the otherwise perfectly repeating floor tile.
+    for (let i = 0; i < 50; i++) {
+      const x = Phaser.Math.Between(0, WORLD_W);
+      const y = Phaser.Math.Between(0, WORLD_H);
+      this.add.image(x, y, 'tile_obsidian')
+        .setTint(0x6633AA)
+        .setDepth(0.05)
+        .setAlpha(0.18)
+        .setScale(1.4);
+    }
   }
 }

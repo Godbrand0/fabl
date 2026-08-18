@@ -39,6 +39,16 @@ export default class RemotePartyMember {
     this.sprite.setTexture(getWeaponCombatStats(equippedWeapon).textureKey);
   }
 
+  /** Current rendered position — used by enemy AI to pick a chase/attack target
+   *  (see CombatScene.nearestTarget), so aggro isn't blind to anyone but the local player. */
+  getPosition(): { x: number; y: number } {
+    return { x: this.sprite.x, y: this.sprite.y };
+  }
+
+  isTargetable(): boolean {
+    return !this.disconnected;
+  }
+
   receivePos(x: number, y: number, flipX: boolean) {
     this.targetX = x;
     this.targetY = y;

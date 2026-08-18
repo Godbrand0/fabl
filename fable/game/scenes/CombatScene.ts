@@ -711,8 +711,25 @@ export default abstract class CombatScene extends Phaser.Scene {
     this.tweens.add({ targets: warn, alpha: 0, duration: 400, yoyo: true, repeat: 3, onComplete: () => warn.destroy() });
   }
 
+  // In multiplayer, only the spawn authority runs this AI (see the isSpawnAuthority
+  // gate in update()) — without this, enemies would only ever notice and chase that
+  // one client's own local player, completely ignoring every other party member no
+  // matter how close they walk. Picks whichever player (local or remote) is nearest.
+  private nearestTarget(x: number, y: number): { x: number; y: number } {
+    let best = { x: this.player.x, y: this.player.y };
+    let bestDist = Phaser.Math.Distance.Between(x, y, best.x, best.y);
+    this.remoteMembers.forEach(rm => {
+      if (!rm.isTargetable()) return;
+      const pos = rm.getPosition();
+      const d = Phaser.Math.Distance.Between(x, y, pos.x, pos.y);
+      if (d < bestDist) { bestDist = d; best = pos; }
+    });
+    return best;
+  }
+
   private runRegularEnemyAI(enemy: any, time: number) {
-    const dist = Phaser.Math.Distance.Between(enemy.x, enemy.y, this.player.x, this.player.y);
+    const target = this.isMultiplayer ? this.nearestTarget(enemy.x, enemy.y) : this.player;
+    const dist = Phaser.Math.Distance.Between(enemy.x, enemy.y, target.x, target.y);
     const aggroRadius = 180;
 
     if (dist > aggroRadius) {
@@ -722,13 +739,13 @@ export default abstract class CombatScene extends Phaser.Scene {
     }
 
     // Chase player
-    const angle = Phaser.Math.Angle.Between(enemy.x, enemy.y, this.player.x, this.player.y);
+    const angle = Phaser.Math.Angle.Between(enemy.x, enemy.y, target.x, target.y);
     const speed = enemy.getData('isSlowed') ? this.regularEnemyConfig.speed * 0.5 : this.regularEnemyConfig.speed;
     enemy.setVelocity(
       Math.cos(angle) * speed,
       Math.sin(angle) * speed
     );
-    enemy.setFlipX(this.player.x < enemy.x);
+    enemy.setFlipX(target.x < enemy.x);
 
     // Ranged attack when close enough
     const lastShot = enemy.getData('lastShot') || 0;
@@ -752,7 +769,8 @@ export default abstract class CombatScene extends Phaser.Scene {
   }
 
   private runBossAI(boss: any, time: number) {
-    const angle = Phaser.Math.Angle.Between(boss.x, boss.y, this.player.x, this.player.y);
+    const target = this.isMultiplayer ? this.nearestTarget(boss.x, boss.y) : this.player;
+    const angle = Phaser.Math.Angle.Between(boss.x, boss.y, target.x, target.y);
     const speed = boss.getData('isSlowed') ? this.bossConfig.speed * 0.5 : this.bossConfig.speed;
     boss.setVelocity(
       Math.cos(angle) * speed,

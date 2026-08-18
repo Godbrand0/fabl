@@ -581,6 +581,36 @@ export default class BootScene extends Phaser.Scene {
       g.fillRect(14, 7, 1, 3);
     });
 
+    // ─── RIFT CRYSTAL (20×48) ─── Co-op arena decoration — jagged violet crystal spike ───
+    draw('rift_crystal', 20, 48, (g) => {
+      // Dark base shard
+      g.fillStyle(0x2A1050);
+      g.fillTriangle(10, 0, 2, 40, 18, 40);
+      // Mid facet
+      g.fillStyle(0x5A2AA0);
+      g.fillTriangle(10, 6, 5, 38, 13, 38);
+      // Bright inner glow edge
+      g.fillStyle(0x9B5CFF);
+      g.fillTriangle(10, 10, 8, 36, 12, 36);
+      g.fillStyle(0xD9B3FF);
+      g.fillRect(9, 14, 2, 18);
+      // Ground shadow/base rocks
+      g.fillStyle(0x1A0A34);
+      g.fillEllipse(10, 42, 16, 8);
+      g.fillStyle(0x2A1050);
+      g.fillEllipse(10, 40, 12, 5);
+    });
+
+    // ─── RIFT SHARD (10×14) ─── Small scattered glowing debris for the co-op arena ───
+    draw('rift_shard', 10, 14, (g) => {
+      g.fillStyle(0x3A1870);
+      g.fillTriangle(5, 0, 0, 12, 10, 12);
+      g.fillStyle(0xB878FF);
+      g.fillTriangle(5, 3, 3, 11, 7, 11);
+      g.fillStyle(0xEEDDFF);
+      g.fillRect(4, 5, 2, 5);
+    });
+
     // ─── CHICKEN (16×14) ───
     draw('chicken', 16, 14, (g) => {
       g.fillStyle(0xEEEEEE);
