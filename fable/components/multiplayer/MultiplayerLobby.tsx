@@ -15,6 +15,7 @@ interface MultiplayerLobbyProps {
   walletAddress: string;
   walletConnected: boolean;
   connectWallet: () => Promise<void>;
+  avaxBalance: string;
   fableBalance: string;
   refreshBalance: () => Promise<void>;
   showMessage: (msg: string) => void;
@@ -23,7 +24,7 @@ interface MultiplayerLobbyProps {
 type Stage = 'menu' | 'lobby' | 'mission';
 
 export default function MultiplayerLobby({
-  playerData, setPlayerData, walletAddress, walletConnected, connectWallet, fableBalance, refreshBalance, showMessage,
+  playerData, setPlayerData, walletAddress, walletConnected, connectWallet, avaxBalance, fableBalance, refreshBalance, showMessage,
 }: MultiplayerLobbyProps) {
   const [stage, setStage] = useState<Stage>('menu');
   const [joinCode, setJoinCode] = useState('');
@@ -187,6 +188,7 @@ export default function MultiplayerLobby({
         roster={roster}
         walletConnected={walletConnected}
         connectWallet={connectWallet}
+        avaxBalance={avaxBalance}
         fableBalance={fableBalance}
         refreshBalance={refreshBalance}
         onExit={() => setStage('lobby')}

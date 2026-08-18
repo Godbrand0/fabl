@@ -4,10 +4,13 @@ import React, { useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { Heart, Skull, Trophy, LogOut, Loader2, Swords } from 'lucide-react';
 import gameBridge from '../../game/systems/GameBridge';
+import { audioManager } from '../../lib/audio';
 import { avalancheService } from '../../lib/avalanche';
 import { dbService } from '../../lib/supabaseClient';
 import { ZONE_LEVEL_IDS, ZONE_LEVEL_REWARDS } from '../../lib/nft';
 import type { PartyPresence } from '../../lib/multiplayer';
+import MiniMap from '../MiniMap';
+import GameControls from '../GameControls';
 
 // Phaser (imported by MultiplayerGameContainer) touches browser globals at module load
 // time, so — same as single-player's GameContainer in app/page.tsx — this must be
@@ -22,6 +25,12 @@ const MultiplayerGameContainer = dynamic(() => import('../MultiplayerGameContain
   ),
 });
 
+// MenuPage is what renders this component's own ancestor chain (MenuPage ->
+// MultiplayerLobby -> MultiplayerMission) — importing it statically here would be a
+// circular import. Dynamic import breaks that cycle at bundle-eval time, the same
+// trick used above for MultiplayerGameContainer.
+const PauseMenu = dynamic(() => import('../MenuPage'), { ssr: false });
+
 const ZONE_KEY = 'MultiplayerArenaScene';
 const zoneReward = ZONE_LEVEL_REWARDS[ZONE_KEY] ?? 0;
 
@@ -35,6 +44,7 @@ interface MultiplayerMissionProps {
   roster: PartyPresence[];
   walletConnected: boolean;
   connectWallet: () => Promise<void>;
+  avaxBalance: string;
   fableBalance: string;
   refreshBalance: () => Promise<void>;
   onExit: () => void;
@@ -42,7 +52,7 @@ interface MultiplayerMissionProps {
 
 export default function MultiplayerMission({
   playerData, setPlayerData, wallet, partyId, isHost, joinedAt, roster,
-  walletConnected, connectWallet, fableBalance, refreshBalance, onExit,
+  walletConnected, connectWallet, avaxBalance, fableBalance, refreshBalance, onExit,
 }: MultiplayerMissionProps) {
   const [hp, setHp] = useState(playerData?.hp ?? 100);
   const [zoneTitle, setZoneTitle] = useState('The Shattered Rift');
@@ -51,6 +61,7 @@ export default function MultiplayerMission({
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [paused, setPaused] = useState(false);
 
   const otherWallets = roster.map(m => m.wallet).filter(w => w !== wallet);
 
@@ -142,15 +153,38 @@ export default function MultiplayerMission({
         otherWallets={otherWallets}
       />
 
-      {/* Minimal in-mission HUD strip */}
-      <div className="absolute top-0 left-0 right-0 z-10 flex items-center justify-between px-4 py-2 bg-black/60 font-mono pointer-events-none">
-        <div className="flex items-center gap-2">
-          <Heart size={14} className="text-red-400" />
-          <span className="text-sm font-bold text-red-300">{Math.max(0, hp)} HP</span>
+      {/* In-mission HUD strip — HP + minimap on the left (mirrors single-player's
+          HUD.tsx layout), zone title centered, party count + pause menu on the right */}
+      <div className="absolute top-0 left-0 right-0 z-10 flex items-start justify-between px-4 py-2 pointer-events-none bg-linear-to-b from-black/80 via-black/30 to-transparent">
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center gap-2 bg-black/60 border border-zinc-800 px-2 py-1 rounded-lg backdrop-blur-md w-fit">
+            <Heart size={14} className="text-red-400" />
+            <span className="text-sm font-bold text-red-300">{Math.max(0, hp)} HP</span>
+          </div>
+          <MiniMap />
         </div>
-        <span className="text-[11px] text-purple-300 font-bold uppercase tracking-widest">{zoneTitle}</span>
-        <span className="text-[10px] text-zinc-400">{roster.length} in party</span>
+
+        <span className="text-[11px] text-purple-300 font-bold uppercase tracking-widest mt-1">{zoneTitle}</span>
+
+        <div className="flex flex-col items-end gap-1.5">
+          <span className="text-[10px] text-zinc-400">{roster.length} in party</span>
+          <button
+            onClick={() => {
+              audioManager.playSfx('click');
+              gameBridge.emit('game_pause');
+              audioManager.pauseMusic();
+              setPaused(true);
+            }}
+            className="pointer-events-auto bg-zinc-900 border-2 border-zinc-700 px-3 py-1 text-[10px] font-bold text-zinc-300 hover:text-white hover:bg-zinc-800 transition-colors shadow-lg active:scale-95"
+            style={{ imageRendering: 'pixelated', fontFamily: 'monospace' }}
+          >
+            MENU
+          </button>
+        </div>
       </div>
+
+      {/* Mobile move/aim joysticks + ability button — identical to single-player's */}
+      <GameControls />
 
       {died && !cleared && (
         <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-4 bg-black/85 font-mono text-center px-4">
@@ -208,6 +242,31 @@ export default function MultiplayerMission({
             </>
           )}
         </div>
+      )}
+
+      {/* Pause menu — identical mechanism to single-player's (app/page.tsx): pauses the
+          Phaser scene and shows the full menu as an overlay, resuming on close. Pausing
+          only ever affects this client's own local scene (each player runs their own
+          Phaser instance), so it never blocks or freezes teammates — except that if the
+          pausing player is currently the party's spawn authority, enemy spawning for the
+          whole party pauses along with their scene until they resume. */}
+      {paused && (
+        <PauseMenu
+          playerData={playerData}
+          setPlayerData={setPlayerData}
+          walletConnected={walletConnected}
+          walletAddress={wallet}
+          connectWallet={connectWallet}
+          avaxBalance={avaxBalance}
+          fableBalance={fableBalance}
+          refreshBalance={refreshBalance}
+          onStartGame={() => {}} // unreachable — MenuPage only calls this when onClose is absent
+          onClose={() => {
+            gameBridge.emit('game_resume');
+            audioManager.resumeMusic();
+            setPaused(false);
+          }}
+        />
       )}
     </div>
   );

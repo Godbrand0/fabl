@@ -368,6 +368,7 @@ export default function MenuPage({
                   walletAddress={walletAddress || playerData?.wallet_address || ''}
                   walletConnected={walletConnected}
                   connectWallet={connectWallet}
+                  avaxBalance={avaxBalance}
                   fableBalance={fableBalance}
                   refreshBalance={refreshBalance}
                   showMessage={showFlashMessage}
