@@ -5,6 +5,7 @@ import { mpService } from '../../lib/multiplayer';
 interface MissionPresence {
   wallet: string;
   joinedAt: number;
+  alive: boolean;
 }
 
 // Owns the single Supabase Realtime channel for an active mission and translates
@@ -12,16 +13,20 @@ interface MissionPresence {
 // touch Supabase directly — they just emit/listen on GameBridge as usual, which is
 // what keeps CombatScene usable with or without multiplayer wired up.
 //
-// Also owns host migration: every client tracks {wallet, joinedAt} Presence on this
-// channel, and independently (no coordinator) computes "am I the earliest joiner still
-// connected?" on every Presence sync. If the answer flips to yes, CombatScene is told
-// to take over spawn authority; if the previous authority's wallet disappears from
-// Presence, that's exactly the case that triggers the flip on whoever's next in line.
+// Also owns host migration: every client tracks {wallet, joinedAt, alive} Presence on
+// this channel, and independently (no coordinator) computes "am I the earliest joiner
+// still connected AND alive?" on every Presence sync. If the answer flips to yes,
+// CombatScene is told to take over spawn authority — this fires both when the previous
+// authority disconnects AND when they die, so a dead host doesn't leave enemies frozen
+// for a still-fighting party.
 class NetworkBridge {
   private channel: RealtimeChannel | null = null;
   private unsubs: Array<() => void> = [];
   private knownWallets: Set<string> = new Set();
+  private knownAlive: Map<string, boolean> = new Map();
   private amIAuthority = false;
+  private myWallet = '';
+  private myJoinedAt = 0;
   // Guards against React effects double-firing in dev (Strict Mode intentionally
   // mounts twice) or any other rapid start/stop/start: without this, a slower-to-settle
   // earlier start() could finish its work after a newer one and clobber it, or a fresh
@@ -42,6 +47,9 @@ class NetworkBridge {
       console.warn('NetworkBridge: Supabase not configured, running without multiplayer sync.');
       return;
     }
+
+    this.myWallet = wallet;
+    this.myJoinedAt = joinedAt;
 
     const ch = mpService.channel(partyId, wallet);
 
@@ -75,6 +83,10 @@ class NetworkBridge {
       if (payload?.wallet === wallet) return;
       gameBridge.emit('mp_in_state_snapshot', payload);
     });
+    ch.on('broadcast', { event: 'final_stats' }, ({ payload }: any) => {
+      if (payload?.wallet === wallet) return;
+      gameBridge.emit('mp_in_final_stats', payload);
+    });
 
     ch.on('presence', { event: 'sync' }, () => {
       const state = ch.presenceState<MissionPresence>();
@@ -89,11 +101,25 @@ class NetworkBridge {
       });
       this.knownWallets = presentWallets;
 
-      // Deterministic, coordinator-free host pick: earliest joiner still connected.
-      // Every remaining client computes this the same way from the same Presence
-      // state, so exactly one of them concludes "that's me" on any given sync.
+      // Downed/revived transitions — distinct from a dropped connection: they're still
+      // present in Presence, just marked not-alive.
+      members.forEach(m => {
+        if (m.wallet === wallet) return;
+        const wasAlive = this.knownAlive.get(m.wallet) ?? true;
+        if (wasAlive && !m.alive) gameBridge.emit('mp_member_downed', { wallet: m.wallet });
+        else if (!wasAlive && m.alive) gameBridge.emit('mp_member_revived', { wallet: m.wallet });
+      });
+      this.knownAlive = new Map(members.map(m => [m.wallet, m.alive]));
+
+      // Deterministic, coordinator-free host pick: earliest joiner who's both still
+      // connected AND alive. Every remaining client computes this the same way from the
+      // same Presence state, so exactly one of them concludes "that's me" on any sync.
+      // Falls back to the full (possibly all-dead) member list only so authority never
+      // ends up assigned to literally nobody.
       if (members.length > 0) {
-        const earliest = [...members].sort((a, b) => a.joinedAt - b.joinedAt)[0];
+        const alivePool = members.filter(m => m.alive);
+        const pool = alivePool.length > 0 ? alivePool : members;
+        const earliest = [...pool].sort((a, b) => a.joinedAt - b.joinedAt)[0];
         const shouldBeAuthority = earliest.wallet === wallet;
         if (shouldBeAuthority !== this.amIAuthority) {
           this.amIAuthority = shouldBeAuthority;
@@ -105,7 +131,7 @@ class NetworkBridge {
     ch.subscribe(async (status) => {
       if (myGeneration !== this.generation) return; // this channel was already superseded/stopped
       if (status === 'SUBSCRIBED') {
-        await ch.track({ wallet, joinedAt });
+        await ch.track({ wallet, joinedAt, alive: true });
         // Catch up on anything already in progress (enemies spawned, boss phase) —
         // a no-op if nobody with authority is listening yet, e.g. we're the first here.
         ch.send({ type: 'broadcast', event: 'request_state', payload: { wallet } });
@@ -134,6 +160,14 @@ class NetworkBridge {
       gameBridge.on('mp_out_state_snapshot', (payload: any) => {
         this.channel?.send({ type: 'broadcast', event: 'state_snapshot', payload: { ...payload, wallet } });
       }),
+      gameBridge.on('mp_out_final_stats', (payload: any) => {
+        this.channel?.send({ type: 'broadcast', event: 'final_stats', payload: { ...payload, wallet } });
+      }),
+      // Re-track our own presence as not-alive so every other client's migration check
+      // and downed-visual detection picks it up on their next sync.
+      gameBridge.on('mp_out_player_died', () => {
+        this.channel?.track({ wallet: this.myWallet, joinedAt: this.myJoinedAt, alive: false });
+      }),
     ];
   }
 
@@ -141,6 +175,7 @@ class NetworkBridge {
     this.unsubs.forEach(unsub => unsub());
     this.unsubs = [];
     this.knownWallets.clear();
+    this.knownAlive.clear();
     this.amIAuthority = false;
     if (this.channel) {
       const ch = this.channel;

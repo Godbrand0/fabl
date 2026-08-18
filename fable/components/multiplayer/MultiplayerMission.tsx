@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
-import { Heart, Skull, Trophy, LogOut, Loader2, Swords } from 'lucide-react';
+import { Heart, Skull, Trophy, LogOut, Loader2, Swords, AlertTriangle } from 'lucide-react';
 import gameBridge from '../../game/systems/GameBridge';
 import { audioManager } from '../../lib/audio';
 import { avalancheService } from '../../lib/avalanche';
@@ -62,14 +62,31 @@ export default function MultiplayerMission({
   const [submitted, setSubmitted] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [paused, setPaused] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
+  // Seeded with our own line the moment we clear, then filled in as teammates' own
+  // mp_out_final_stats broadcasts arrive — see CombatScene.resolveBossPhaseDefeat.
+  const [partyStats, setPartyStats] = useState<Record<string, { kills: number; score: number }>>({});
 
   const otherWallets = roster.map(m => m.wallet).filter(w => w !== wallet);
+  const nameFor = (w: string) => roster.find(m => m.wallet === w)?.name ?? 'A teammate';
 
   useEffect(() => {
     const unsubHp = gameBridge.on('player_health_changed', (data: any) => setHp(data.hp));
     const unsubScene = gameBridge.on('scene_changed', (data: any) => setZoneTitle(data.title), true);
-    const unsubCleared = gameBridge.on('mp_mission_cleared', (data: any) => setCleared({ score: data?.score ?? 0, kills: data?.kills ?? 0 }));
+    const unsubCleared = gameBridge.on('mp_mission_cleared', (data: any) => {
+      const mine = { score: data?.score ?? 0, kills: data?.kills ?? 0 };
+      setCleared(mine);
+      setPartyStats(prev => ({ ...prev, [wallet]: mine }));
+    });
+    const unsubFinalStats = gameBridge.on('mp_in_final_stats', (data: { wallet: string; kills: number; score: number }) => {
+      setPartyStats(prev => ({ ...prev, [data.wallet]: { kills: data.kills, score: data.score } }));
+    });
     const unsubDied = gameBridge.on('player_died', () => setDied(true));
+    const unsubMemberDowned = gameBridge.on('mp_member_downed', (data: { wallet: string }) => {
+      const name = nameFor(data.wallet);
+      setToast(`${name} was downed!`);
+      setTimeout(() => setToast(null), 4000);
+    });
     // Same XP/level-up bookkeeping single-player's HUD does on every kill — without
     // this, co-op kills would earn score/FABLE but never actually level the character,
     // breaking the "everything a player has carries over" premise in the other direction.
@@ -89,7 +106,11 @@ export default function MultiplayerMission({
         return updated;
       });
     });
-    return () => { unsubHp(); unsubScene(); unsubCleared(); unsubDied(); unsubXP(); };
+    return () => {
+      unsubHp(); unsubScene(); unsubCleared(); unsubFinalStats(); unsubDied();
+      unsubMemberDowned(); unsubXP();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Player-signed: submit this run's score using a game-server attestation, via the
@@ -186,34 +207,64 @@ export default function MultiplayerMission({
       {/* Mobile move/aim joysticks + ability button — identical to single-player's */}
       <GameControls />
 
+      {/* "X was downed" toast — z-45 so it's readable over the joystick controls too */}
+      {toast && (
+        <div className="absolute top-16 left-1/2 -translate-x-1/2 z-45 bg-black/85 border-2 border-red-700 text-red-300 px-4 py-2 rounded-lg text-center text-xs font-bold shadow-xl flex items-center gap-2">
+          <AlertTriangle size={13} /> {toast}
+        </div>
+      )}
+
+      {/* Death/victory overlays sit at z-45 — above GameControls' z-40 (the mobile
+          joystick previously overlapped the Exit button here, making it hard to tap)
+          and above the HUD strip, but below the pause menu (z-50) if both are somehow
+          open at once. */}
       {died && !cleared && (
-        <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-4 bg-black/85 font-mono text-center px-4">
+        <div className="absolute inset-0 z-45 flex flex-col items-center justify-center gap-4 bg-black/90 font-mono text-center px-4">
           <Skull size={40} className="text-red-500" />
           <span className="text-xl font-extrabold text-red-400">You were downed</span>
           <p className="text-xs text-zinc-400 max-w-xs">Your party can keep fighting without you — co-op revives are coming in a future update.</p>
           <button
             onClick={onExit}
-            className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-100 font-bold px-5 py-2.5 rounded-xl text-sm"
+            className="flex items-center gap-2 bg-linear-to-r from-red-600 to-red-700 hover:brightness-110 text-white font-extrabold px-8 py-3.5 rounded-xl text-base active:scale-95 transition-all shadow-lg shadow-red-950/50"
           >
-            <LogOut size={14} /> Exit to Lobby
+            <LogOut size={18} /> Exit to Lobby
           </button>
         </div>
       )}
 
       {cleared && (
-        <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-4 bg-black/85 font-mono text-center px-4">
+        <div className="absolute inset-0 z-45 flex flex-col items-center justify-center gap-4 bg-black/90 font-mono text-center px-4 overflow-y-auto py-8">
           <Trophy size={40} className="text-yellow-400" />
           <span className="text-xl font-extrabold text-yellow-300">The Void Titan has fallen!</span>
 
-          <div className="flex gap-3">
-            <div className="bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-2 flex flex-col items-center">
-              <span className="text-lg font-extrabold text-yellow-400">{cleared.score.toLocaleString()}</span>
-              <span className="text-[9px] text-zinc-500 uppercase tracking-wider">Your Score</span>
-            </div>
-            <div className="bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-2 flex flex-col items-center">
-              <span className="text-lg font-extrabold text-red-400 flex items-center gap-1"><Swords size={14} /> {cleared.kills}</span>
-              <span className="text-[9px] text-zinc-500 uppercase tracking-wider">Your Kills</span>
-            </div>
+          {/* Party summary — everyone's final kills/score, filled in as each player's
+              own mp_out_final_stats broadcast arrives (see CombatScene). */}
+          <div className="flex flex-col gap-1.5 w-full max-w-xs">
+            <span className="text-[9px] text-zinc-500 uppercase tracking-wider">Party Results</span>
+            {roster.map(m => {
+              const stats = partyStats[m.wallet];
+              const isMe = m.wallet === wallet;
+              return (
+                <div
+                  key={m.wallet}
+                  className={`flex items-center justify-between px-3 py-2 rounded-lg border text-xs ${
+                    isMe ? 'bg-purple-950/40 border-purple-700' : 'bg-zinc-900 border-zinc-800'
+                  }`}
+                >
+                  <span className={`font-bold truncate ${isMe ? 'text-purple-200' : 'text-zinc-300'}`}>
+                    {m.name}{isMe && <span className="text-purple-400"> (You)</span>}
+                  </span>
+                  {stats ? (
+                    <span className="flex items-center gap-2 shrink-0">
+                      <span className="flex items-center gap-1 text-red-400 font-bold"><Swords size={11} /> {stats.kills}</span>
+                      <span className="text-yellow-400 font-bold">{stats.score.toLocaleString()}</span>
+                    </span>
+                  ) : (
+                    <span className="text-zinc-600 italic shrink-0">waiting…</span>
+                  )}
+                </div>
+              );
+            })}
           </div>
 
           {!submitted ? (
@@ -235,9 +286,9 @@ export default function MultiplayerMission({
               <span className="text-xs text-emerald-400 font-bold">Score submitted — balance: {parseFloat(fableBalance).toFixed(2)} FABLE</span>
               <button
                 onClick={onExit}
-                className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-100 font-bold px-5 py-2.5 rounded-xl text-sm"
+                className="flex items-center gap-2 bg-linear-to-r from-yellow-500 to-amber-600 hover:brightness-110 text-black font-extrabold px-8 py-3.5 rounded-xl text-base active:scale-95 transition-all shadow-lg shadow-amber-950/50"
               >
-                <LogOut size={14} /> Exit to Lobby
+                <LogOut size={18} /> Exit to Lobby
               </button>
             </>
           )}

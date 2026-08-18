@@ -7,6 +7,8 @@ interface MinimapData {
   world: { w: number; h: number };
   player: { x: number; y: number };
   enemies: { x: number; y: number; isBoss: boolean }[];
+  /** Multiplayer only — other party members' live positions. */
+  party?: { x: number; y: number; ghosted: boolean }[];
   defeated: number;
   required: number;
   bossSpawned: boolean;
@@ -50,6 +52,13 @@ export default function MiniMap() {
               ? 'w-2.5 h-2.5 bg-orange-500 ring-1 ring-orange-300 animate-pulse'
               : 'w-1.5 h-1.5 bg-red-500'}`}
             style={{ left: pct(e.x, data.world.w), top: pct(e.y, data.world.h), transform: 'translate(-50%, -50%)' }}
+          />
+        ))}
+        {data.party?.map((p, i) => (
+          <div
+            key={i}
+            className={`absolute w-2 h-2 bg-yellow-400 rounded-full ring-1 ring-yellow-100 ${p.ghosted ? 'opacity-35' : ''}`}
+            style={{ left: pct(p.x, data.world.w), top: pct(p.y, data.world.h), transform: 'translate(-50%, -50%)' }}
           />
         ))}
         <div

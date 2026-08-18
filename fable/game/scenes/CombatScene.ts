@@ -362,6 +362,12 @@ export default abstract class CombatScene extends Phaser.Scene {
     const unsubMemberLeft = gameBridge.on('mp_member_left', (data: { wallet: string }) => {
       this.remoteMembers.get(data.wallet)?.markDisconnected();
     });
+    const unsubMemberDowned = gameBridge.on('mp_member_downed', (data: { wallet: string }) => {
+      this.remoteMembers.get(data.wallet)?.markDowned();
+    });
+    const unsubMemberRevived = gameBridge.on('mp_member_revived', (data: { wallet: string }) => {
+      this.remoteMembers.get(data.wallet)?.markRevived();
+    });
 
     this.events.on('destroy', () => {
       unsubL(); unsubR(); unsubA(); unsubSI(); unsubNext(); unsubW();
@@ -369,6 +375,7 @@ export default abstract class CombatScene extends Phaser.Scene {
       unsubPartyData(); unsubRemotePos(); unsubBossPhase();
       unsubEnemySpawn(); unsubEnemySnapshot(); unsubEnemyDamage(); unsubEnemyRemoved(); unsubEnemyShot();
       unsubRoleChanged(); unsubRequestState(); unsubStateSnapshot(); unsubMemberLeft();
+      unsubMemberDowned(); unsubMemberRevived();
       this.remoteMembers.forEach(rm => rm.destroy());
       this.remoteMembers.clear();
     });
@@ -611,10 +618,14 @@ export default abstract class CombatScene extends Phaser.Scene {
     const enemies = this.enemies.getChildren()
       .filter((e: any) => e.active)
       .map((e: any) => ({ x: e.x, y: e.y, isBoss: !!e.isBoss }));
+    const party = this.isMultiplayer
+      ? Array.from(this.remoteMembers.values()).map(rm => ({ ...rm.getPosition(), ghosted: rm.isGhosted() }))
+      : [];
     gameBridge.emit('minimap_update', {
       world: { w: WORLD_W, h: WORLD_H },
       player: { x: this.player.x, y: this.player.y },
       enemies,
+      party,
       defeated: this.enemiesDefeated,
       required: this.requiredDefeatsToBoss,
       bossSpawned: this.bossSpawned,
@@ -966,6 +977,11 @@ export default abstract class CombatScene extends Phaser.Scene {
         this.isMultiplayer ? 'mp_mission_cleared' : 'zone_cleared',
         { zone: this.scene.key, score: this.runScore, kills: this.personalKills },
       );
+      // Share our own final tally with the rest of the party so everyone's results
+      // screen can show a full kill/score breakdown, not just their own line.
+      if (this.isMultiplayer) {
+        gameBridge.emit('mp_out_final_stats', { kills: this.personalKills, score: this.runScore });
+      }
       this.cameras.main.flash(800, 255, 220, 0);
     }
   }
@@ -1029,6 +1045,11 @@ export default abstract class CombatScene extends Phaser.Scene {
       requiredDefeatsToBoss: this.requiredDefeatsToBoss,
       bossSpawned: this.bossSpawned,
     });
+    // Tell the party we're down — NetworkBridge re-tracks our presence as not-alive,
+    // which (a) ghosts our sprite on teammates' screens distinctly from a dropped
+    // connection, and (b) hands spawn authority to a living teammate immediately if we
+    // were the host, instead of freezing enemies for the rest of the party.
+    if (this.isMultiplayer) gameBridge.emit('mp_out_player_died');
   }
 
   // Paid continue: revive exactly where the player fell — kill count, score,
