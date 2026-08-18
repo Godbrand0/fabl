@@ -471,41 +471,43 @@ export default class BootScene extends Phaser.Scene {
       g.fillRect(28, 38, 24, 3);
     });
 
-    // ─── VOID IMP (24×32) ─── Co-op arena enemy — spectral violet raider, distinct from the ember imp ───
+    // ─── VOID IMP (24×32) ─── Co-op arena enemy — bright lavender raider, deliberately
+    // lighter than the near-black rift ground/chasm tiles so it reads clearly at a
+    // glance on mobile screens, unlike the darker original palette ───
     draw('void_imp', 24, 32, (g) => {
-      // Wings (dark violet, wispy)
-      g.fillStyle(0x1A0A3A);
+      // Wings (lavender, wispy)
+      g.fillStyle(0x5A2AA0);
       g.fillTriangle(0, 6, 6, 2, 6, 18);
       g.fillTriangle(24, 6, 18, 2, 18, 18);
-      g.fillStyle(0x3A1A6E);
+      g.fillStyle(0x8A5CD0);
       g.fillTriangle(0, 8, 5, 4, 5, 16);
       g.fillTriangle(24, 8, 19, 4, 19, 16);
 
       // Body
-      g.fillStyle(0x4B1E8C);
+      g.fillStyle(0x9B5CFF);
       g.fillRect(5, 8, 14, 18);
-      g.fillStyle(0x6E33B8);
+      g.fillStyle(0xC79BFF);
       g.fillRect(7, 10, 10, 10);
 
       // Head
-      g.fillStyle(0x4B1E8C);
+      g.fillStyle(0x9B5CFF);
       g.fillRect(6, 2, 12, 10);
 
       // Horns
-      g.fillStyle(0x220A44);
+      g.fillStyle(0x2A1050);
       g.fillRect(6, 0, 3, 3);
       g.fillRect(15, 0, 3, 3);
 
-      // Glowing violet eyes
-      g.fillStyle(0xCC66FF);
+      // Glowing eyes (warm accent against the cool body for extra pop)
+      g.fillStyle(0xFFCC44);
       g.fillRect(8, 5, 3, 3);
       g.fillRect(13, 5, 3, 3);
-      g.fillStyle(0xEEBBFF);
+      g.fillStyle(0xFFEEAA);
       g.fillRect(9, 6, 1, 1);
       g.fillRect(14, 6, 1, 1);
 
       // Legs
-      g.fillStyle(0x3A1670);
+      g.fillStyle(0x7A3ED0);
       g.fillRect(6, 26, 5, 6);
       g.fillRect(13, 26, 5, 6);
 
@@ -609,6 +611,54 @@ export default class BootScene extends Phaser.Scene {
       g.fillTriangle(5, 3, 3, 11, 7, 11);
       g.fillStyle(0xEEDDFF);
       g.fillRect(4, 5, 2, 5);
+    });
+
+    // ─── VOID CHASM (32×32) ─── Co-op arena barrier — impassable crack spilling raw
+    // rift energy, the arena's equivalent of Ember Fields' lava river tile ───
+    draw('tile_void_chasm', 32, 32, (g) => {
+      g.fillStyle(0x05030A);
+      g.fillRect(0, 0, 32, 32);
+      // Energy bands
+      g.fillStyle(0x6A1FBE);
+      g.fillRect(0, 4, 32, 6);
+      g.fillRect(0, 16, 32, 8);
+      // Bright hot spots
+      g.fillStyle(0x9B4DFF);
+      g.fillRect(4, 5, 8, 4);
+      g.fillRect(18, 18, 10, 4);
+      g.fillStyle(0xE8CCFF);
+      g.fillRect(6, 6, 4, 2);
+      g.fillRect(22, 20, 4, 2);
+      // Dark cooling crust edges
+      g.fillStyle(0x150730);
+      g.fillRect(0, 0, 32, 3);
+      g.fillRect(0, 29, 32, 3);
+    });
+
+    // ─── VOID CHASM BORDER (32×32) ─── Cracked edge tile bordering the chasm ───
+    draw('tile_void_chasm_border', 32, 32, (g) => {
+      g.fillStyle(0x1C0E3A);
+      g.fillRect(0, 0, 32, 32);
+      g.fillStyle(0x8A3AE0);
+      g.fillRect(4, 0, 2, 14);
+      g.fillRect(14, 6, 2, 26);
+      g.fillRect(22, 0, 1, 18);
+      g.fillRect(28, 10, 2, 22);
+      g.fillRect(0, 20, 10, 2);
+      g.fillRect(18, 26, 14, 2);
+      g.fillStyle(0xB878FF);
+      g.fillRect(5, 2, 1, 10);
+      g.fillRect(15, 8, 1, 20);
+    });
+
+    // ─── VOID GLOW (64×64) ─── Pulsing rift-energy pool, decoration near the chasm ───
+    draw('void_glow', 64, 64, (g) => {
+      g.fillStyle(0x9B4DFF, 0.3);
+      g.fillCircle(32, 32, 30);
+      g.fillStyle(0xB878FF, 0.2);
+      g.fillCircle(32, 32, 22);
+      g.fillStyle(0xE8CCFF, 0.1);
+      g.fillCircle(32, 32, 14);
     });
 
     // ─── CHICKEN (16×14) ───
