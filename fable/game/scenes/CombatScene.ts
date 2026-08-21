@@ -1,7 +1,8 @@
 import Phaser from 'phaser';
 import gameBridge from '../systems/GameBridge';
 import { audioManager } from '../../lib/audio';
-import { computePlayerDamage, computeShootCooldown, getWeaponCombatStats } from '../../lib/combatFormulas';
+import { computePlayerDamage, computeShootCooldown, getPlayerTextureKey } from '../../lib/combatFormulas';
+import { DEFAULT_SKIN } from '../../lib/skins';
 import RemotePartyMember from '../systems/RemotePartyMember';
 
 export interface EnemyConfig {
@@ -32,6 +33,9 @@ export default abstract class CombatScene extends Phaser.Scene {
   protected playerLevel = 1;
   protected playerDmg = 32;
   private playerDefense = 0;
+  // Stored so weapon_changed (which only carries a weapon id, not the full PlayerData)
+  // can still recompute the correct skin-combined texture key.
+  private playerSkin: string = DEFAULT_SKIN;
 
   // Joystick
   private joystickMoveDir = { x: 0, y: 0 };
@@ -44,7 +48,6 @@ export default abstract class CombatScene extends Phaser.Scene {
   private activeAbility: string | null = null;
   private shieldActive = false;
   private shieldCircle: Phaser.GameObjects.Arc | null = null;
-  protected equippedWeaponAtk = 5;
 
   // Keyboard
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
@@ -145,14 +148,14 @@ export default abstract class CombatScene extends Phaser.Scene {
         const str = data.stats?.strength || 0;
         const agi = data.stats?.agility || 0;
         const def = data.stats?.defense || 0;
-        const weapon = getWeaponCombatStats(data.equippedWeapon ?? 'bamboo_stick');
-        this.equippedWeaponAtk = weapon.attack;
-        this.playerDmg = computePlayerDamage(str, data.equippedWeapon ?? 'bamboo_stick');
+        this.playerSkin = data.skin || DEFAULT_SKIN;
+        const weaponId = data.equippedWeapon ?? 'bamboo_stick';
+        this.playerDmg = computePlayerDamage(str, weaponId);
         this.playerDefense = def;
         this.shootCooldown = computeShootCooldown(agi);
         this.activeAbility = data.activeAbility ?? null;
-        // Apply equipped weapon texture on load
-        if (this.player?.active) this.player.setTexture(weapon.textureKey);
+        // Apply skin + equipped weapon texture on load
+        if (this.player?.active) this.player.setTexture(getPlayerTextureKey(this.playerSkin, weaponId));
 
         // Seed mid-zone kill/score progress once, from the player's last save
         if (!this.zoneProgressSeeded) {
@@ -246,7 +249,10 @@ export default abstract class CombatScene extends Phaser.Scene {
       if (!this.isMultiplayer || !data) return;
       const existing = this.remoteMembers.get(wallet);
       if (existing) { existing.updateGear(data.equippedWeapon); return; }
-      const rm = new RemotePartyMember(this, wallet, data.name ?? 'Ally', data.equippedWeapon ?? 'bamboo_stick', this.player.x, this.player.y);
+      const rm = new RemotePartyMember(
+        this, wallet, data.name ?? 'Ally', data.skin || DEFAULT_SKIN, data.equippedWeapon ?? 'bamboo_stick',
+        this.player.x, this.player.y,
+      );
       this.remoteMembers.set(wallet, rm);
     });
     const unsubRemotePos = gameBridge.on('mp_in_pos', (payload: any) => {

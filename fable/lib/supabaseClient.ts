@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { NftItem } from './nft';
+import { DEFAULT_SKIN } from './skins';
 
 const supabaseUrl     = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
@@ -26,6 +27,7 @@ export interface PlayerData {
   };
   statPoints: number;
   maxUnlockedZone: number;
+  skin: string;                // character skin id (see lib/skins.ts) — chosen once at creation
   equippedWeapon: string;
   arsenal: string[];          // weapon IDs owned (includes free starter + AVAX-bought NFTs)
   abilities: string[];        // ability IDs owned via AVAX purchase
@@ -65,6 +67,7 @@ function withDefaults(p: any): PlayerData {
     stats:            p.stats            ?? { strength: 0, agility: 0, defense: 0, vitality: 0 },
     statPoints:       p.statPoints       ?? p.statpoints   ?? 0,
     maxUnlockedZone:  p.maxUnlockedZone  ?? p.maxunlockedzone  ?? 1,
+    skin:             p.skin             ?? DEFAULT_SKIN,
     equippedWeapon:   p.equippedWeapon   ?? p.equippedweapon   ?? 'bamboo_stick',
     arsenal:          p.arsenal          ?? ['bamboo_stick'],
     abilities:        p.abilities        ?? [],
@@ -94,6 +97,7 @@ function toDbRow(player: PlayerData) {
     stats:            player.stats,
     statpoints:       player.statPoints,
     maxunlockedzone:  player.maxUnlockedZone,
+    skin:             player.skin ?? DEFAULT_SKIN,
     equippedweapon:   player.equippedWeapon,
     arsenal:          player.arsenal,
     abilities:        player.abilities,

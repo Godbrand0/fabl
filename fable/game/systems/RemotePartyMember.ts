@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { getWeaponCombatStats } from '../../lib/combatFormulas';
+import { getPlayerTextureKey } from '../../lib/combatFormulas';
 
 const STALE_AFTER_MS = 2000; // no pos update in this long -> fade to a "reconnecting" ghost
 const FULL_ALPHA = 1;
@@ -20,10 +20,12 @@ export default class RemotePartyMember {
   private lastUpdateAt: number;
   private disconnected = false;
   private downed = false;
+  private skin: string;
 
-  constructor(scene: Phaser.Scene, wallet: string, name: string, equippedWeapon: string, x: number, y: number) {
-    const textureKey = getWeaponCombatStats(equippedWeapon).textureKey;
+  constructor(scene: Phaser.Scene, wallet: string, name: string, skin: string, equippedWeapon: string, x: number, y: number) {
+    const textureKey = getPlayerTextureKey(skin, equippedWeapon);
     this.name = name;
+    this.skin = skin;
     this.sprite = scene.add.sprite(x, y, textureKey);
     this.sprite.setDepth(6);
     this.sprite.setTint(TEAMMATE_TINT);
@@ -41,7 +43,7 @@ export default class RemotePartyMember {
   }
 
   updateGear(equippedWeapon: string) {
-    this.sprite.setTexture(getWeaponCombatStats(equippedWeapon).textureKey);
+    this.sprite.setTexture(getPlayerTextureKey(this.skin, equippedWeapon));
   }
 
   /** Current rendered position — used by enemy AI to pick a chase/attack target

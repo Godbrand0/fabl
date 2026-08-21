@@ -17,6 +17,7 @@ import { avalancheService } from '../lib/avalanche';
 import { audioManager } from '../lib/audio';
 import gameBridge from '../game/systems/GameBridge';
 import { AVAX_ITEMS, STAT_POINT_FIRST_COST, STAT_POINT_COST } from '../lib/nft';
+import { getPlayerTextureKey } from '../lib/combatFormulas';
 
 type Section = 'nav' | 'tavern' | 'bank' | 'marketplace' | 'multiplayer' | 'leaderboard' | 'stats' | 'profile' | 'codex' | 'loadout' | 'settings';
 
@@ -212,8 +213,9 @@ export default function MenuPage({
     setPlayerData((prev: any) => {
       const updated = { ...prev, equippedWeapon: weaponId };
       dbService.savePlayer(updated);
-      const wDef = TAVERN_WEAPONS.find(w => w.id === weaponId);
-      if (wDef?.textureKey) gameBridge.emit('weapon_changed', { textureKey: wDef.textureKey });
+      // Skin-combined key — a player's chosen skin must carry over onto every weapon,
+      // not just the default one they started with.
+      gameBridge.emit('weapon_changed', { textureKey: getPlayerTextureKey(prev.skin, weaponId) });
       return updated;
     });
   };

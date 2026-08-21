@@ -29,6 +29,9 @@ CREATE TABLE IF NOT EXISTS public.players (
     -- Progression
     maxunlockedzone     INTEGER     NOT NULL DEFAULT 1,
 
+    -- Character skin — chosen once at onboarding (see lib/skins.ts for valid ids)
+    skin                TEXT        NOT NULL DEFAULT 'human',
+
     -- Equipment
     equippedweapon      TEXT        NOT NULL DEFAULT 'bamboo_stick',
     arsenal             TEXT[]      NOT NULL DEFAULT ARRAY['bamboo_stick'],
@@ -81,7 +84,8 @@ ALTER TABLE public.players
     ADD COLUMN IF NOT EXISTS zone_progress  JSONB NOT NULL DEFAULT '{}'::jsonb,
     ADD COLUMN IF NOT EXISTS current_zone   TEXT DEFAULT NULL,
     ADD COLUMN IF NOT EXISTS tempbuff       TEXT DEFAULT NULL,
-    ADD COLUMN IF NOT EXISTS referred_by    TEXT REFERENCES public.players(wallet_address);
+    ADD COLUMN IF NOT EXISTS referred_by    TEXT REFERENCES public.players(wallet_address),
+    ADD COLUMN IF NOT EXISTS skin           TEXT NOT NULL DEFAULT 'human';
 
 -- Back-fill existing players so they don't see the new-player tutorial retroactively
 UPDATE public.players SET onboarded = true WHERE level > 1 OR maxunlockedzone > 1;

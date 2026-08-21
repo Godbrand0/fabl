@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { SKIN_PALETTES, SkinPalette } from '../../lib/skins';
 
 export default class BootScene extends Phaser.Scene {
   constructor() {
@@ -42,127 +43,78 @@ export default class BootScene extends Phaser.Scene {
       g.destroy();
     };
 
-    // ─── PLAYER BASE FUNCTION ───
-    const drawPlayer = (g: Phaser.GameObjects.Graphics) => {
-      const skin = 0xA05C28;
-      const headwrap = 0xCCCCBB;
-      const shirt = 0xE8D8C8;
-      const pants = 0x5C6840;
-      const boot = 0x2A1608;
-
-      // Headwrap
-      g.fillStyle(headwrap);
-      g.fillRect(9, 0, 14, 5);
-      g.fillRect(7, 3, 18, 4);
+    // ─── PLAYER BASE FUNCTION ─── Takes a skin palette so the same body shape can be
+    // reused for every character skin — see lib/skins.ts for the palette values. ───
+    const drawPlayer = (g: Phaser.GameObjects.Graphics, p: SkinPalette) => {
+      // Behind everything else — wings tucked behind the shoulders, etc.
+      p.backShapes?.forEach((s) => {
+        g.fillStyle(s.color);
+        if (s.type === 'rect') g.fillRect(s.x, s.y, s.w, s.h);
+        else g.fillTriangle(s.x1, s.y1, s.x2, s.y2, s.x3, s.y3);
+      });
+      // Headwrap — skipped for non-humanoid skins that replace it with horns
+      // (see extraShapes below); a bare skin-colored cap fills the gap instead.
+      if (!p.hideHeadwrap) {
+        g.fillStyle(p.headwrap);
+        g.fillRect(9, 0, 14, 5);
+        g.fillRect(7, 3, 18, 4);
+      } else {
+        g.fillStyle(p.skin);
+        g.fillRect(9, 1, 14, 4);
+      }
       // Face
-      g.fillStyle(skin);
+      g.fillStyle(p.skin);
       g.fillRect(9, 5, 14, 9);
       // Eyes
-      g.fillStyle(0x1A0800);
+      g.fillStyle(p.eye);
       g.fillRect(11, 8, 3, 2);
       g.fillRect(18, 8, 3, 2);
+      if (p.eyeGlow) {
+        g.fillStyle(p.eyeGlow);
+        g.fillRect(12, 8, 1, 1);
+        g.fillRect(19, 8, 1, 1);
+      }
       // Neck
-      g.fillStyle(skin);
+      g.fillStyle(p.skin);
       g.fillRect(14, 14, 4, 3);
       // Shirt / torso
-      g.fillStyle(shirt);
+      g.fillStyle(p.shirt);
       g.fillRect(7, 17, 18, 12);
       // Arms (skin)
-      g.fillStyle(skin);
+      g.fillStyle(p.skin);
       g.fillRect(2, 17, 7, 10);
       g.fillRect(23, 17, 7, 10);
       // Wrists
-      g.fillStyle(shirt);
+      g.fillStyle(p.shirt);
       g.fillRect(2, 27, 5, 2);
       g.fillRect(25, 27, 5, 2);
-      // Pants / legs
-      g.fillStyle(pants);
-      g.fillRect(7, 29, 8, 13);
-      g.fillRect(17, 29, 8, 13);
-      // Boots
-      g.fillStyle(boot);
-      g.fillRect(6, 42, 9, 6);
-      g.fillRect(17, 42, 9, 6);
+      // Pants / legs + boots — skipped entirely for skins whose lower body is a tail
+      // instead (see hideLegs / extraShapes).
+      if (!p.hideLegs) {
+        g.fillStyle(p.pants);
+        g.fillRect(7, 29, 8, 13);
+        g.fillRect(17, 29, 8, 13);
+        g.fillStyle(p.boot);
+        g.fillRect(6, 42, 9, 6);
+        g.fillRect(17, 42, 9, 6);
+      }
+      // Accents (rune-cracks, ember veins, ...) — drawn last so they sit on top of the
+      // body colors instead of being a flat recolor with no surface detail.
+      p.accents?.forEach((a) => {
+        g.fillStyle(a.color);
+        g.fillRect(a.x, a.y, a.w, a.h);
+      });
+      // Extra geometry (horns, a tail, ...) beyond the shared human silhouette.
+      p.extraShapes?.forEach((s) => {
+        g.fillStyle(s.color);
+        if (s.type === 'rect') g.fillRect(s.x, s.y, s.w, s.h);
+        else g.fillTriangle(s.x1, s.y1, s.x2, s.y2, s.x3, s.y3);
+      });
     };
 
-    // ─── PLAYER (BAMBOO STICK) ───
-    draw('player_bamboo', 32, 48, (g) => {
-      drawPlayer(g);
-      const bamboo = 0x4A8A1A;
-      g.fillStyle(bamboo);
-      g.fillRect(25, 6, 4, 26);
-      g.fillStyle(0x3A6A0A);
-      g.fillRect(25, 12, 4, 2);
-      g.fillRect(25, 20, 4, 2);
-      g.fillStyle(0x6AB830);
-      g.fillRect(26, 7, 1, 24);
-    });
-
-    // ─── PLAYER (IRON SWORD) ───
-    draw('player_iron_sword', 32, 48, (g) => {
-      drawPlayer(g);
-      // Blade
-      g.fillStyle(0xB0B8C0);
-      g.fillRect(26, 2, 2, 28);
-      // Edge highlight
-      g.fillStyle(0xE8EEF0);
-      g.fillRect(27, 2, 1, 14);
-      // Crossguard
-      g.fillStyle(0x707880);
-      g.fillRect(23, 16, 8, 2);
-      // Grip
-      g.fillStyle(0x5C3A1E);
-      g.fillRect(26, 18, 2, 8);
-    });
-
-    // ─── PLAYER (EMBER BLADE) ───
-    draw('player_ember_blade', 32, 48, (g) => {
-      drawPlayer(g);
-      // Blade base & mid
-      g.fillStyle(0x8B2200);
-      g.fillRect(26, 2, 2, 14);
-      g.fillStyle(0xD45000);
-      g.fillRect(26, 8, 2, 8);
-      // Hot edge
-      g.fillStyle(0xFFAA00);
-      g.fillRect(27, 2, 1, 14);
-      // Tip accent
-      g.fillStyle(0xFFEE44);
-      g.fillRect(26, 2, 2, 2);
-      // Crossguard
-      g.fillStyle(0x6E3010);
-      g.fillRect(23, 16, 8, 2);
-      // Grip
-      g.fillStyle(0x3A1A08);
-      g.fillRect(26, 18, 2, 8);
-    });
-
-    // ─── PLAYER (OBSIDIAN GREATSWORD) ───
-    draw('player_obsidian_gs', 32, 48, (g) => {
-      drawPlayer(g);
-      // Blade
-      g.fillStyle(0x1A1020);
-      g.fillRect(25, 0, 3, 20);
-      // Edge shimmer
-      g.fillStyle(0x6644AA);
-      g.fillRect(27, 0, 1, 20);
-      // Blade face crack
-      g.fillStyle(0x3A2060);
-      g.fillRect(26, 6, 1, 6);
-      // Crossguard
-      g.fillStyle(0x0E0A14);
-      g.fillRect(22, 20, 10, 3);
-      // Grip wrap
-      g.fillStyle(0x2A1808);
-      g.fillRect(26, 23, 2, 10);
-      // Gemstone hint
-      g.fillStyle(0x6644AA);
-      g.fillRect(26, 27, 1, 1);
-    });
-
-    // Alias 'player' to 'player_bamboo' for compatibility
-    draw('player', 32, 48, (g) => {
-      drawPlayer(g);
+    // ─── WEAPON OVERLAYS ─── Extracted so any skin's body can carry any weapon —
+    // the overlay is drawn on top of drawPlayer(g, palette), never touches skin colors.
+    const drawBambooOverlay = (g: Phaser.GameObjects.Graphics) => {
       g.fillStyle(0x4A8A1A);
       g.fillRect(25, 6, 4, 26);
       g.fillStyle(0x3A6A0A);
@@ -170,6 +122,70 @@ export default class BootScene extends Phaser.Scene {
       g.fillRect(25, 20, 4, 2);
       g.fillStyle(0x6AB830);
       g.fillRect(26, 7, 1, 24);
+    };
+    const drawIronSwordOverlay = (g: Phaser.GameObjects.Graphics) => {
+      g.fillStyle(0xB0B8C0);
+      g.fillRect(26, 2, 2, 28);
+      g.fillStyle(0xE8EEF0);
+      g.fillRect(27, 2, 1, 14);
+      g.fillStyle(0x707880);
+      g.fillRect(23, 16, 8, 2);
+      g.fillStyle(0x5C3A1E);
+      g.fillRect(26, 18, 2, 8);
+    };
+    const drawEmberBladeOverlay = (g: Phaser.GameObjects.Graphics) => {
+      g.fillStyle(0x8B2200);
+      g.fillRect(26, 2, 2, 14);
+      g.fillStyle(0xD45000);
+      g.fillRect(26, 8, 2, 8);
+      g.fillStyle(0xFFAA00);
+      g.fillRect(27, 2, 1, 14);
+      g.fillStyle(0xFFEE44);
+      g.fillRect(26, 2, 2, 2);
+      g.fillStyle(0x6E3010);
+      g.fillRect(23, 16, 8, 2);
+      g.fillStyle(0x3A1A08);
+      g.fillRect(26, 18, 2, 8);
+    };
+    const drawObsidianGsOverlay = (g: Phaser.GameObjects.Graphics) => {
+      g.fillStyle(0x1A1020);
+      g.fillRect(25, 0, 3, 20);
+      g.fillStyle(0x6644AA);
+      g.fillRect(27, 0, 1, 20);
+      g.fillStyle(0x3A2060);
+      g.fillRect(26, 6, 1, 6);
+      g.fillStyle(0x0E0A14);
+      g.fillRect(22, 20, 10, 3);
+      g.fillStyle(0x2A1808);
+      g.fillRect(26, 23, 2, 10);
+      g.fillStyle(0x6644AA);
+      g.fillRect(26, 27, 1, 1);
+    };
+
+    const WEAPON_OVERLAYS: Record<string, (g: Phaser.GameObjects.Graphics) => void> = {
+      bamboo: drawBambooOverlay,
+      iron_sword: drawIronSwordOverlay,
+      ember_blade: drawEmberBladeOverlay,
+      obsidian_gs: drawObsidianGsOverlay,
+    };
+
+    // ─── HUMAN SKIN (default) ─── Keeps the exact existing 'player_*' texture keys —
+    // byte-for-byte the same output as before skins existed, so every player created
+    // prior to this feature (and defaulted to the 'human' skin) renders unchanged. ───
+    draw('player_bamboo', 32, 48, (g) => { drawPlayer(g, SKIN_PALETTES.human); drawBambooOverlay(g); });
+    draw('player_iron_sword', 32, 48, (g) => { drawPlayer(g, SKIN_PALETTES.human); drawIronSwordOverlay(g); });
+    draw('player_ember_blade', 32, 48, (g) => { drawPlayer(g, SKIN_PALETTES.human); drawEmberBladeOverlay(g); });
+    draw('player_obsidian_gs', 32, 48, (g) => { drawPlayer(g, SKIN_PALETTES.human); drawObsidianGsOverlay(g); });
+    // Alias 'player' to 'player_bamboo' for compatibility
+    draw('player', 32, 48, (g) => { drawPlayer(g, SKIN_PALETTES.human); drawBambooOverlay(g); });
+
+    // ─── OTHER SKINS ─── One texture per (skin × weapon) combo, keyed `${skin}_${suffix}` —
+    // see lib/combatFormulas.ts's getPlayerTextureKey for how this key is derived at runtime.
+    Object.values(SKIN_PALETTES).forEach((palette) => {
+      if (palette.id === 'human') return; // already generated above under the legacy key scheme
+      Object.entries(WEAPON_OVERLAYS).forEach(([suffix, overlay]) => {
+        draw(`${palette.id}_${suffix}`, 32, 48, (g) => { drawPlayer(g, palette); overlay(g); });
+      });
     });
 
     // ─── IMP (24×32) ─── Crimson demon, ember wings, glowing orange eyes ───

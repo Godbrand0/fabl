@@ -8,7 +8,9 @@ import { avalancheService } from '../lib/avalanche';
 import { audioManager } from '../lib/audio';
 import HUD from '../components/HUD';
 import MenuPage from '../components/MenuPage';
+import SkinPicker from '../components/SkinPicker';
 import gameBridge from '../game/systems/GameBridge';
+import { DEFAULT_SKIN } from '../lib/skins';
 import { Wallet2, User, Loader2, AlertTriangle } from 'lucide-react';
 
 const GameContainer = dynamic(() => import('../components/GameContainer'), {
@@ -43,6 +45,7 @@ export default function Home() {
 
   // Character creation state
   const [charName, setCharName]     = useState('');
+  const [selectedSkin, setSelectedSkin] = useState(DEFAULT_SKIN);
   const [creating, setCreating]     = useState(false);
 
   // In-game pause menu (overlays GameContainer + HUD without unmounting them)
@@ -188,6 +191,7 @@ export default function Home() {
       stats,
       statPoints:      0,
       maxUnlockedZone: 1,
+      skin:            selectedSkin,
       equippedWeapon:  'bamboo_stick',
       arsenal:         ['bamboo_stick'],
       abilities:       [],
@@ -396,6 +400,8 @@ export default function Home() {
                 required
               />
             </div>
+
+            <SkinPicker selected={selectedSkin} onSelect={setSelectedSkin} />
 
             <button
               type="submit"
