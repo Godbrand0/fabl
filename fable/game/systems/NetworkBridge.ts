@@ -134,7 +134,9 @@ class NetworkBridge {
         await ch.track({ wallet, joinedAt, alive: true });
         // Catch up on anything already in progress (enemies spawned, boss phase) —
         // a no-op if nobody with authority is listening yet, e.g. we're the first here.
-        ch.send({ type: 'broadcast', event: 'request_state', payload: { wallet } });
+        // CombatScene also re-emits mp_out_request_state periodically (see its
+        // multiplayer self-heal timer), routed through the same relay below.
+        gameBridge.emit('mp_out_request_state');
       }
     });
     this.channel = ch;
@@ -157,6 +159,9 @@ class NetworkBridge {
       relay('mp_out_enemy_damage', 'enemy_damage'),
       relay('mp_out_enemy_removed', 'enemy_removed'),
       relay('mp_out_enemy_shot', 'enemy_shot'),
+      gameBridge.on('mp_out_request_state', () => {
+        this.channel?.send({ type: 'broadcast', event: 'request_state', payload: { wallet } });
+      }),
       gameBridge.on('mp_out_state_snapshot', (payload: any) => {
         this.channel?.send({ type: 'broadcast', event: 'state_snapshot', payload: { ...payload, wallet } });
       }),

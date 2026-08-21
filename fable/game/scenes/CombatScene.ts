@@ -207,6 +207,20 @@ export default abstract class CombatScene extends Phaser.Scene {
       loop: true,
     });
 
+    // Multiplayer self-heal: a non-authority client normally stays in sync purely from
+    // the host's ~150ms position broadcasts, but a single dropped packet (a flaky
+    // mobile connection is the common case) otherwise leaves an enemy frozen forever —
+    // nothing was re-requesting state after the very first join. Periodically asking
+    // again means a missed broadcast heals itself within a few seconds instead of
+    // staying stuck for the rest of the mission.
+    this.time.addEvent({
+      delay: 4000,
+      callback: () => {
+        if (this.isMultiplayer && !this.isSpawnAuthority) gameBridge.emit('mp_out_request_state');
+      },
+      loop: true,
+    });
+
     // Keyboard
     if (this.input.keyboard) {
       this.cursors = this.input.keyboard.createCursorKeys();
@@ -353,8 +367,33 @@ export default abstract class CombatScene extends Phaser.Scene {
         this.bossPhaseIndex = data.bossPhaseIndex;
         this.bossLivesRemaining = this.bossLives - this.bossPhaseIndex;
       }
+
+      // A stale enemy we're still tracking but the host no longer reports must have
+      // been defeated while we were out of sync (its removal broadcast likely dropped
+      // on the same flaky connection that dropped the position updates) — clean it up.
+      const freshIds = new Set(data.enemies?.map(e => e.id) ?? []);
+      this.enemyById.forEach((enemy, id) => {
+        if (freshIds.has(id) || this.resolvedEnemyIds.has(id)) return;
+        this.resolvedEnemyIds.add(id);
+        this.enemyById.delete(id);
+        if (enemy.active) enemy.destroy();
+      });
+
       data.enemies?.forEach(e => {
-        if (this.enemyById.has(e.id)) return; // already have it, e.g. from a spawn broadcast that beat this response
+        const existing = this.enemyById.get(e.id);
+        if (existing) {
+          // Re-sync position/hp for an enemy we already have but may have gone stale
+          // on — this is what actually un-freezes enemies after a missed
+          // mp_in_enemy_snapshot broadcast (e.g. a dropped packet on a mobile
+          // connection); without this, a resync only ever spawned MISSING enemies and
+          // silently ignored ones already tracked, so a frozen enemy stayed frozen.
+          if (existing.active) {
+            existing.x = e.x;
+            existing.y = e.y;
+            existing.setData('hp', e.hp);
+          }
+          return;
+        }
         const config = e.isBoss ? this.bossConfig : this.regularEnemyConfig;
         const enemy = this.spawnEnemySprite(config, e.x, e.y, e.isBoss, e.id, e.hp);
         if (e.isBoss) {
